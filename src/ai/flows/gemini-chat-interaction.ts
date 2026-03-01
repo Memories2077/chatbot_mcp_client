@@ -40,8 +40,11 @@ const geminiChatInteractionFlow = ai.defineFlow(
     // The input history is already structurally compatible with Genkit's ChatTurn for text-only content.
     const chatHistory: ChatTurn[] = history as ChatTurn[];
 
+    // Ensure the model name has the 'googleai/' prefix to avoid errors with old stored settings.
+    const fullModelName = modelName.startsWith('googleai/') ? modelName : `googleai/${modelName}`;
+
     const response = await ai.generate({
-      model: modelName,
+      model: fullModelName,
       history: chatHistory,
       prompt: message, // The current user message is the direct prompt to the LLM
       config: {
