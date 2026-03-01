@@ -3,23 +3,21 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { v4 as uuidv4 } from 'uuid';
-import type { ChatMessage, ChatSettings, ChatRole } from '@/lib/types';
-import { geminiChatInteraction } from '@/ai/flows/gemini-chat-interaction';
-import { mcpServerToolIntegration } from '@/ai/flows/mcp-server-tool-integration';
+import type { ChatMessage, ChatSettings } from '@/lib/types';
 
 interface ChatState {
   messages: ChatMessage[];
   historyForLLM: { role: 'user' | 'model'; content: string }[];
   settings: ChatSettings;
   isLoading: boolean;
-  sendMessage: (text: string) => void;
+  sendMessage: (text: string, settings?: ChatSettings) => void;
   setSettings: (settings: ChatSettings) => void;
   addMessage: (message: ChatMessage) => void;
   clearMessages: () => void;
 }
 
 const defaultSettings: ChatSettings = {
-  model: 'googleai/gemini-2.5-flash',
+  model: 'gemini-2.0-flash',
   temperature: 0.7,
   maxTokens: 2048,
   mcpServers: [],
@@ -37,10 +35,13 @@ export const useChatStore = create<ChatState>()(
       
       addMessage: (message) => set((state) => ({ messages: [...state.messages, message] })),
 
-      clearMessages: () => set({ messages: [], historyForLLM: [] }),
+      clearMessages: () => {
+        console.log("Clearing all messages and LLM history.");
+        set({ messages: [], historyForLLM: [] });
+      },
 
-      sendMessage: async (text) => {
-        const { settings, historyForLLM } = get();
+      sendMessage: async (text, settings) => {
+        const { historyForLLM } = get();
         set({ isLoading: true });
 
         const userMessage: ChatMessage = {
@@ -50,64 +51,39 @@ export const useChatStore = create<ChatState>()(
         };
         set((state) => ({ messages: [...state.messages, userMessage] }));
 
+        const newHistory = [...historyForLLM, { role: 'user' as const, content: text }];
+
         try {
-          if (settings.mcpServers.length > 0) {
-            // Use tool integration flow
-            const toolResponse = await mcpServerToolIntegration({
-              userMessage: text,
-              mcpServerUrls: settings.mcpServers.map(s => s.url),
-              modelName: settings.model,
-              temperature: settings.temperature,
-              maxOutputTokens: settings.maxTokens,
-              history: historyForLLM,
-            });
+          const response = await fetch('http://100.78.98.117:8000/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              messages: newHistory,
+              model: settings?.model,
+              temperature: settings?.temperature,
+              mcpServers: settings?.mcpServers.map(s => s.url)
+            })
+          });
 
-            // Add tool call visualization if any
-            if (toolResponse.toolCalls && toolResponse.toolCalls.length > 0) {
-                const toolCallMessage: ChatMessage = {
-                    id: uuidv4(),
-                    role: 'tool-output',
-                    content: toolResponse.response,
-                    toolCalls: toolResponse.toolCalls.map(tc => ({ name: tc.name, args: tc.input })),
-                };
-                set((state) => ({ messages: [...state.messages, toolCallMessage] }));
-            } else {
-                // Regular model response without tool usage
-                 const modelMessage: ChatMessage = {
-                    id: uuidv4(),
-                    role: 'model',
-                    content: toolResponse.response,
-                };
-                set((state) => ({ messages: [...state.messages, modelMessage] }));
-            }
-             
-            // Update history
-            set({ historyForLLM: [
-                ...historyForLLM,
-                { role: 'user', content: text },
-                { role: 'model', content: toolResponse.response }
-            ]});
-
-          } else {
-            // Use simple chat flow
-            const chatResponse = await geminiChatInteraction({
-              message: text,
-              history: historyForLLM,
-              modelName: settings.model,
-              temperature: settings.temperature,
-            });
-
-            const modelMessage: ChatMessage = {
-              id: uuidv4(),
-              role: 'model',
-              content: chatResponse.response,
-            };
-            set((state) => ({ messages: [...state.messages, modelMessage] }));
-            set({ historyForLLM: chatResponse.newHistory });
+          if (!response.ok) {
+            throw new Error(`Backend error: ${response.statusText}`);
           }
+
+          const data = await response.json();
+
+          const modelMessage: ChatMessage = {
+            id: uuidv4(),
+            role: 'model',
+            content: data.response,
+          };
+          set((state) => ({ 
+            messages: [...state.messages, modelMessage],
+            historyForLLM: [...newHistory, { role: 'model' as const, content: data.response }]
+          }));
+          
         } catch (error: any) {
           console.error("Error calling AI flow:", error);
-          const errorMessageText = error.message || "Sorry, I encountered an unknown error. Please try again.";
+          const errorMessageText = error.message || "Sorry, I encountered an unknown error connecting to the Python backend. Make sure it's running on http://100.78.98.117:8000.";
           const errorMessage: ChatMessage = {
             id: uuidv4(),
             role: 'system',

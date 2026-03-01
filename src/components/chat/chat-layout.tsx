@@ -46,7 +46,7 @@ export function ChatLayout() {
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
-    sendMessage(input);
+    sendMessage(input, settings);
     setInput('');
   };
 
