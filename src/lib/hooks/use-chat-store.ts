@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { ChatMessage, ChatSettings, ChatRole } from '@/lib/types';
 import { geminiChatInteraction } from '@/ai/flows/gemini-chat-interaction';
 import { mcpServerToolIntegration } from '@/ai/flows/mcp-server-tool-integration';
-import { useToast } from '@/hooks/use-toast';
+import { toast } from '@/hooks/use-toast';
 
 interface ChatState {
   messages: ChatMessage[];
@@ -20,7 +20,7 @@ interface ChatState {
 }
 
 const defaultSettings: ChatSettings = {
-  model: 'gemini-2.5-flash',
+  model: 'googleai/gemini-2.5-flash',
   temperature: 0.7,
   maxTokens: 2048,
   mcpServers: [],
@@ -108,7 +108,6 @@ export const useChatStore = create<ChatState>()(
           }
         } catch (error) {
           console.error("Error calling AI flow:", error);
-          const { toast } = useToast();
           toast({
             title: "An error occurred",
             description: "Failed to get a response from the AI. Please check your API key and network connection.",

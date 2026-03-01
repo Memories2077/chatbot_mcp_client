@@ -15,7 +15,7 @@ const ChatInteractionInputSchema = z.object({
   history: z.array(
     z.object({ role: z.enum(['user', 'model']), content: z.string() })
   ).describe('The conversation history leading up to this turn.'),
-  modelName: z.string().default('gemini-2.5-flash').describe('The name of the Gemini model to use.'),
+  modelName: z.string().default('googleai/gemini-2.5-flash').describe('The name of the Gemini model to use.'),
   temperature: z.number().min(0).max(1).default(0.7).describe('The temperature for the LLM response generation.'),
 });
 export type ChatInteractionInput = z.infer<typeof ChatInteractionInputSchema>;

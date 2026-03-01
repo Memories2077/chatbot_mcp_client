@@ -18,7 +18,7 @@ import { Tool } from 'genkit';
 const McpServerToolIntegrationInputSchema = z.object({
   userMessage: z.string().describe('The user\'s message to the LLM.'),
   mcpServerUrls: z.array(z.string().url()).describe('An array of URLs for MCP servers to integrate as tools.'),
-  modelName: z.string().optional().describe('Optional: The name of the Gemini model to use (e.g., "gemini-2.5-flash"). Defaults to configured model.'),
+  modelName: z.string().optional().describe('Optional: The name of the Gemini model to use (e.g., "googleai/gemini-2.5-flash"). Defaults to configured model.'),
   temperature: z.number().min(0).max(1).default(0.7).optional().describe('Optional: Controls the randomness of the output. Lower values mean less random.'),
   maxOutputTokens: z.number().int().positive().optional().describe('Optional: The maximum number of tokens to generate in the response.'),
   history: z.array(z.object({

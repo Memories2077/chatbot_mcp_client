@@ -110,8 +110,8 @@ export function ChatSettings({ settings, setSettings }: ChatSettingsProps) {
                         </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                        <SelectItem value="gemini-2.5-flash">gemini-2.5-flash</SelectItem>
-                        <SelectItem value="gemini-2.5-pro">gemini-2.5-pro</SelectItem>
+                        <SelectItem value="googleai/gemini-2.5-flash">gemini-2.5-flash</SelectItem>
+                        <SelectItem value="googleai/gemini-2.5-pro">gemini-2.5-pro</SelectItem>
                         </SelectContent>
                     </Select>
                     </FormItem>
