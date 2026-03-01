@@ -1,7 +1,7 @@
 import {
   Bot,
   User,
-  Tool,
+  Wrench,
   Send,
   SlidersHorizontal,
   Plus,
@@ -16,7 +16,7 @@ export type Icon = LucideIcon;
 export const Icons = {
   bot: Bot,
   user: User,
-  tool: Tool,
+  tool: Wrench,
   send: Send,
   settings: SlidersHorizontal,
   add: Plus,
