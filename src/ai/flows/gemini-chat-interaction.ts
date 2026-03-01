@@ -8,7 +8,7 @@
  */
 
 import { ai } from '@/ai/genkit';
-import { z, ChatTurn } from 'genkit';
+import { z } from 'genkit';
 
 const ChatInteractionInputSchema = z.object({
   message: z.string().describe('The current message from the user.'),
@@ -37,16 +37,19 @@ const geminiChatInteractionFlow = ai.defineFlow(
   async (input) => {
     const { message, history, modelName, temperature } = input;
 
-    // The input history is already structurally compatible with Genkit's ChatTurn for text-only content.
-    const chatHistory: ChatTurn[] = history as ChatTurn[];
+    // Convert history and current message to the 'messages' format for consistency
+    const messages: Array<{role: 'user' | 'model', content: Array<{text: string}>}> = history.map(turn => ({
+      role: turn.role,
+      content: [{ text: turn.content }]
+    }));
+    messages.push({ role: 'user', content: [{ text: message }] });
 
     // Ensure the model name has the 'googleai/' prefix to avoid errors with old stored settings.
     const fullModelName = modelName.startsWith('googleai/') ? modelName : `googleai/${modelName}`;
 
     const response = await ai.generate({
       model: fullModelName,
-      history: chatHistory,
-      prompt: message, // The current user message is the direct prompt to the LLM
+      messages: messages, // Use 'messages' format
       config: {
         temperature: temperature,
         safetySettings: [
@@ -71,13 +74,15 @@ const geminiChatInteractionFlow = ai.defineFlow(
     });
 
     if (!response.output) {
-      throw new Error('LLM did not return a response.');
+      // This error is thrown if the LLM response is blocked or empty.
+      // This could be due to safety settings, or an issue with the API key.
+      throw new Error('LLM did not return a response. This may be due to safety settings or an invalid API key.');
     }
 
     const llmResponse = response.text;
 
     // Update history with the user's message and the LLM's response
-    const newHistory: ChatTurn[] = [
+    const newHistory: Array<{ role: 'user' | 'model', content: string }> = [
       ...history,
       { role: 'user', content: message },
       { role: 'model', content: llmResponse },

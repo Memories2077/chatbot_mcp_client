@@ -105,12 +105,13 @@ export const useChatStore = create<ChatState>()(
             set((state) => ({ messages: [...state.messages, modelMessage] }));
             set({ historyForLLM: chatResponse.newHistory });
           }
-        } catch (error) {
+        } catch (error: any) {
           console.error("Error calling AI flow:", error);
+          const errorMessageText = error.message || "Sorry, I encountered an unknown error. Please try again.";
           const errorMessage: ChatMessage = {
             id: uuidv4(),
             role: 'system',
-            content: "Sorry, I encountered an error. Please try again.",
+            content: errorMessageText,
           };
           set((state) => ({ messages: [...state.messages, errorMessage] }));
         } finally {
