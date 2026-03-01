@@ -6,7 +6,6 @@ import { v4 as uuidv4 } from 'uuid';
 import type { ChatMessage, ChatSettings, ChatRole } from '@/lib/types';
 import { geminiChatInteraction } from '@/ai/flows/gemini-chat-interaction';
 import { mcpServerToolIntegration } from '@/ai/flows/mcp-server-tool-integration';
-import { toast } from '@/hooks/use-toast';
 
 interface ChatState {
   messages: ChatMessage[];
@@ -108,11 +107,6 @@ export const useChatStore = create<ChatState>()(
           }
         } catch (error) {
           console.error("Error calling AI flow:", error);
-          toast({
-            title: "An error occurred",
-            description: "Failed to get a response from the AI. Please check your API key and network connection.",
-            variant: "destructive"
-          })
           const errorMessage: ChatMessage = {
             id: uuidv4(),
             role: 'system',
