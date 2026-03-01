@@ -40,7 +40,7 @@ class Message(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: List[Message]
-    model: Optional[str] = "gemini-2.0-flash"
+    model: Optional[str] = "gemini-2.5-flash"
     temperature: Optional[float] = 0.0
     mcpServers: Optional[List[str]] = []
 

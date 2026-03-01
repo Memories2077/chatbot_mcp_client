@@ -34,6 +34,14 @@ export function ChatLayout() {
   const inputRef = React.useRef<HTMLTextAreaElement>(null);
   const scrollAreaRef = React.useRef<React.ElementRef<typeof ScrollArea>>(null);
 
+  // Auto-resize textarea
+  React.useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+      inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 200)}px`;
+    }
+  }, [input]);
+
   React.useEffect(() => {
     // Scroll to the bottom when a new message is added
     if (scrollAreaRef.current) {
