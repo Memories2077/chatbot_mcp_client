@@ -37,19 +37,19 @@ const geminiChatInteractionFlow = ai.defineFlow(
   async (input) => {
     const { message, history, modelName, temperature } = input;
 
-    // Convert history and current message to the 'messages' format for consistency
-    const messages: Array<{role: 'user' | 'model', content: Array<{text: string}>}> = history.map(turn => ({
-      role: turn.role,
+    // Convert history to the format expected by Genkit's `history` option
+    const llmHistory = history.map(turn => ({
+      role: turn.role as 'user' | 'model',
       content: [{ text: turn.content }]
     }));
-    messages.push({ role: 'user', content: [{ text: message }] });
 
     // Ensure the model name has the 'googleai/' prefix to avoid errors with old stored settings.
     const fullModelName = modelName.startsWith('googleai/') ? modelName : `googleai/${modelName}`;
 
     const response = await ai.generate({
       model: fullModelName,
-      messages: messages, // Use 'messages' format
+      prompt: message, // The current user message is the direct prompt to the LLM
+      history: llmHistory,
       config: {
         temperature: temperature,
         safetySettings: [

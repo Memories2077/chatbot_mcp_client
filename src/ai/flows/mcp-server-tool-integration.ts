@@ -161,22 +161,12 @@ const mcpServerToolIntegrationFlow = ai.defineFlow(
       allTools = allTools.concat(tools);
     }
 
-    // Prepare messages for the LLM, including historical context and the current user message.
-    const messages: Array<{role: 'user' | 'model', content: Array<{text: string}>}> = [];
+    // Prepare history for the LLM
+    const llmHistory = input.history?.map(entry => ({
+      role: entry.role as 'user' | 'model',
+      content: [{ text: entry.content }]
+    })) || [];
 
-    // Add historical messages if provided
-    input.history?.forEach(entry => {
-      messages.push({
-        role: entry.role,
-        content: [{ text: entry.content }]
-      });
-    });
-
-    // Add the current user message as the latest turn
-    messages.push({
-        role: 'user',
-        content: [{ text: input.userMessage }]
-    });
 
     // Use the base model configured in src/ai/genkit.ts, or the one specified by the user
     const model = ai.model(input.modelName || 'googleai/gemini-2.5-flash');
@@ -184,8 +174,9 @@ const mcpServerToolIntegrationFlow = ai.defineFlow(
     // Generate a response using the LLM, providing it with the dynamically loaded tools.
     const result = await ai.generate({
       model: model,
-      messages: messages, // Use messages for conversational context
-      tools: allTools,   // Pass dynamically loaded tools for the LLM to use
+      prompt: input.userMessage,
+      history: llmHistory,
+      tools: allTools,
       config: {
         temperature: input.temperature,
         maxOutputTokens: input.maxOutputTokens,
