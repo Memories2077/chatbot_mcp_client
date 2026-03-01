@@ -1,1 +1,5 @@
-// Flows will be imported for their side effects in this file.
+import { config } from 'dotenv';
+config();
+
+import '@/ai/flows/gemini-chat-interaction.ts';
+import '@/ai/flows/mcp-server-tool-integration.ts';
