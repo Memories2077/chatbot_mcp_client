@@ -51,6 +51,7 @@ class AgentState:
         self.exit_stack = None
         self.current_model = None
         self.current_mcp_urls = []
+        self.lock = asyncio.Lock() # Add lock to prevent race conditions
 
 state = AgentState()
 
@@ -58,19 +59,28 @@ async def get_or_create_agent(model_name: str, mcp_urls: List[str], temperature:
     # Ensure mcp_urls is a clean list of strings
     mcp_urls = [str(url) for url in mcp_urls if url]
     
-    # Check if we can reuse the existing agent
-    if (state.agent and 
-        state.current_model == model_name and 
-        sorted(state.current_mcp_urls) == sorted(mcp_urls)):
-        return state.agent
+    async with state.lock:
+        # Check if we can reuse the existing agent
+        if (state.agent and 
+            state.current_model == model_name and 
+            sorted(state.current_mcp_urls) == sorted(mcp_urls)):
+            return state.agent
 
-    print(f"\n--- CONFIG CHANGE DETECTED ---")
-    print(f"Re-initializing agent with {model_name}...")
-    
-    if state.exit_stack:
-        await state.exit_stack.aclose()
-    
-    api_key = os.getenv("GEMINI_API_KEY", "")
+        print(f"\n--- CONFIG CHANGE DETECTED ---")
+        print(f"Re-initializing agent with {model_name}...")
+        
+        # Aggressive cleanup of the old stack
+        if state.exit_stack:
+            try:
+                # We wrap this in a protected block to catch anyio's task-mismatch errors
+                await state.exit_stack.aclose()
+            except Exception as e:
+                print(f"Note: Cleanup of old MCP sessions was messy (Task mismatch), but moving on: {e}")
+            finally:
+                state.exit_stack = None
+                state.agent = None
+        
+        api_key = os.getenv("GEMINI_API_KEY", "")
     if not api_key:
         raise Exception("GEMINI_API_KEY not found.")
 
@@ -118,7 +128,10 @@ async def get_or_create_agent(model_name: str, mcp_urls: List[str], temperature:
     state.current_mcp_urls = mcp_urls.copy()
     return state.agent
 
-SYSTEM_PROMPT = "You are a helpful AI assistant. Remember and refer back to previous parts of the conversation."
+SYSTEM_PROMPT = """You are a helpful and intelligent AI assistant. 
+The conversation history is provided in chronological order (from oldest to newest). 
+Always refer to the most recent messages to maintain context. 
+You have access to MCP tools provided in the current session to assist the user."""
 
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):

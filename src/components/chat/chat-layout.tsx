@@ -30,6 +30,7 @@ export function ChatLayout() {
   }));
 
   const [input, setInput] = React.useState('');
+  const [isComposing, setIsComposing] = React.useState(false);
   const inputRef = React.useRef<HTMLTextAreaElement>(null);
   const scrollAreaRef = React.useRef<React.ElementRef<typeof ScrollArea>>(null);
 
@@ -43,9 +44,9 @@ export function ChatLayout() {
     }
   }, [messages]);
   
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!input.trim() || isLoading) return;
+  const handleSubmit = (e?: React.FormEvent<HTMLFormElement> | React.KeyboardEvent) => {
+    if (e) e.preventDefault();
+    if (!input.trim() || isLoading || isComposing) return;
     sendMessage(input, settings);
     setInput('');
   };
@@ -109,7 +110,7 @@ export function ChatLayout() {
       
       <div className="w-full shrink-0 border-t bg-background">
         <form
-          onSubmit={handleSubmit}
+          onSubmit={(e) => handleSubmit(e)}
           className="mx-auto flex max-w-4xl w-full items-end gap-2 p-4"
         >
           <div className="relative flex-1">
@@ -117,10 +118,13 @@ export function ChatLayout() {
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onCompositionStart={() => setIsComposing(true)}
+              onCompositionEnd={() => setIsComposing(false)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
+                  if (isComposing) return;
                   e.preventDefault();
-                  handleSubmit(e as any);
+                  handleSubmit();
                 }
               }}
               placeholder="Type your message..."
