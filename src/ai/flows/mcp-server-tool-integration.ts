@@ -171,35 +171,34 @@ const mcpServerToolIntegrationFlow = ai.defineFlow(
     // Use the base model configured in src/ai/genkit.ts, or the one specified by the user
     const model = ai.model(input.modelName || 'googleai/gemini-2.5-flash');
 
-    // Generate a response using the LLM, providing it with the dynamically loaded tools.
-    const result = await ai.generate({
-      model: model,
-      prompt: input.userMessage,
-      history: llmHistory,
-      tools: allTools,
-      config: {
-        temperature: input.temperature,
-        maxOutputTokens: input.maxOutputTokens,
-        safetySettings: [
-            {
-                category: 'HARM_CATEGORY_HATE_SPEECH',
-                threshold: 'BLOCK_NONE',
-            },
-            {
-                category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
-                threshold: 'BLOCK_NONE',
-            },
-            {
-                category: 'HARM_CATEGORY_HARASSMENT',
-                threshold: 'BLOCK_NONE',
-            },
-            {
-                category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
-                threshold: 'BLOCK_NONE',
-            },
-        ]
-      },
+    const chat = model.startChat({
+        history: llmHistory,
+        tools: allTools,
+        config: {
+            temperature: input.temperature,
+            maxOutputTokens: input.maxOutputTokens,
+            safetySettings: [
+                {
+                    category: 'HARM_CATEGORY_HATE_SPEECH',
+                    threshold: 'BLOCK_NONE',
+                },
+                {
+                    category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
+                    threshold: 'BLOCK_NONE',
+                },
+                {
+                    category: 'HARM_CATEGORY_HARASSMENT',
+                    threshold: 'BLOCK_NONE',
+                },
+                {
+                    category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
+                    threshold: 'BLOCK_NONE',
+                },
+            ]
+        },
     });
+
+    const result = await chat.sendMessage(input.userMessage);
 
     // Extract the textual response from the LLM.
     const responseContent = result.text;

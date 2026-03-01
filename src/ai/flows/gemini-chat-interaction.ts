@@ -46,9 +46,7 @@ const geminiChatInteractionFlow = ai.defineFlow(
     // Ensure the model name has the 'googleai/' prefix to avoid errors with old stored settings.
     const fullModelName = modelName.startsWith('googleai/') ? modelName : `googleai/${modelName}`;
 
-    const response = await ai.generate({
-      model: fullModelName,
-      prompt: message, // The current user message is the direct prompt to the LLM
+    const chat = ai.model(fullModelName).startChat({
       history: llmHistory,
       config: {
         temperature: temperature,
@@ -72,6 +70,8 @@ const geminiChatInteractionFlow = ai.defineFlow(
         ]
       },
     });
+
+    const response = await chat.sendMessage(message);
 
     if (!response.output) {
       // This error is thrown if the LLM response is blocked or empty.
