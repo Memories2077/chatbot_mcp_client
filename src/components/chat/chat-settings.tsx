@@ -89,7 +89,7 @@ export function ChatSettings({ settings, setSettings }: ChatSettingsProps) {
             <div className="space-y-4">
               <h3 className="font-medium">API Configuration</h3>
               <div className='p-4 rounded-lg border border-yellow-500/50 bg-yellow-500/10 text-yellow-300 text-sm'>
-                Your <code className='font-semibold text-yellow-200'>GOOGLE_API_KEY</code> must be set as an environment variable in a <code className='font-semibold text-yellow-200'>.env.local</code> file in the root of this project. The app will not function without it.
+                Your <code className='font-semibold text-yellow-200'>GEMINI_API_KEY</code> must be set as an environment variable in a <code className='font-semibold text-yellow-200'>.env.local</code> file in the root of this project. The app will not function without it.
               </div>
             </div>
 
@@ -110,8 +110,8 @@ export function ChatSettings({ settings, setSettings }: ChatSettingsProps) {
                         </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                        <SelectItem value="googleai/gemini-2.5-flash">gemini-2.5-flash</SelectItem>
-                        <SelectItem value="googleai/gemini-2.5-pro">gemini-2.5-pro</SelectItem>
+                        <SelectItem value="gemini-2.5-flash">gemini-2.5-flash</SelectItem>
+                        <SelectItem value="gemini-2.5-pro">gemini-2.5-pro</SelectItem>
                         </SelectContent>
                     </Select>
                     </FormItem>

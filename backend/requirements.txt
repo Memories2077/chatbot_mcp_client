@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pydantic
+mcp
+langchain
+langchain-mcp-adapters
+langchain-google-genai
+langgraph
+python-dotenv
