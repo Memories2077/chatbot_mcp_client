@@ -1,20 +1,17 @@
 'use server';
 /**
- * @fileOverview A Genkit flow for integrating dynamic MCP server tools with Gemini LLM.
+ * @fileOverview A LangChain flow for integrating dynamic MCP server tools with Gemini LLM.
  *
  * - mcpServerToolIntegration - A function that handles user queries by leveraging dynamically loaded tools from MCP servers.
  * - McpServerToolIntegrationInput - The input type for the mcpServerToolIntegration function.
  * - McpServerToolIntegrationOutput - The return type for the mcpServerToolIntegration function.
  */
 
-import { ai } from '@/ai/genkit';
-import { z } from 'genkit';
-import { Tool } from 'genkit';
+import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
+import { HumanMessage, AIMessage, ToolMessage } from "@langchain/core/messages";
+import { DynamicTool } from "langchain/tools";
+import { z } from 'zod';
 
-/**
- * Input schema for the MCP Server Tool Integration flow.
- * It includes the user's message, a list of MCP server URLs, and optional model configuration.
- */
 const McpServerToolIntegrationInputSchema = z.object({
   userMessage: z.string().describe('The user\'s message to the LLM.'),
   mcpServerUrls: z.array(z.string().url()).describe('An array of URLs for MCP servers to integrate as tools.'),
@@ -28,210 +25,151 @@ const McpServerToolIntegrationInputSchema = z.object({
 });
 export type McpServerToolIntegrationInput = z.infer<typeof McpServerToolIntegrationInputSchema>;
 
-/**
- * Output schema for the MCP Server Tool Integration flow.
- * It includes the LLM's response and details about any tool calls and their outputs.
- */
 const McpServerToolIntegrationOutputSchema = z.object({
-  response: z.string().describe('The LLM\'s response, incorporating tool outputs if any.'),
-  toolCalls: z.array(z.object({
-    name: z.string().describe('The name of the tool called.'),
-    input: z.any().describe('The input parameters passed to the tool.'),
-  })).optional().describe('Details of tools called by the LLM.'),
-  toolOutputs: z.array(z.object({
-    toolCall: z.object({
-      name: z.string().describe('The name of the tool that was called.'),
+    response: z.string().describe('The LLM\'s response, incorporating tool outputs if any.'),
+    toolCalls: z.array(z.object({
+      name: z.string().describe('The name of the tool called.'),
       input: z.any().describe('The input parameters passed to the tool.'),
-    }),
-    output: z.any().describe('The output returned by the tool.'),
-  })).optional().describe('Outputs from the tools called by the LLM.'),
+    })).optional().describe('Details of tools called by the LLM.'),
+    toolOutputs: z.array(z.object({
+      name: z.string(),
+      input: z.any(),
+      output: z.any(),
+    })).optional().describe('Outputs from the tools called by the LLM.'),
 });
 export type McpServerToolIntegrationOutput = z.infer<typeof McpServerToolIntegrationOutputSchema>;
 
-/**
- * Simulates loading tools from an MCP server URL.
- * In a real application, this would involve connecting to the MCP server
- * to discover its available tools, their schemas, and their execution endpoints.
- * For this example, it returns mock Genkit Tool definitions.
- * @param mcpUrl The URL of the MCP server.
- * @returns A promise that resolves to an array of Genkit Tool objects.
- */
-async function loadMcpToolsFromUrl(mcpUrl: string): Promise<Tool<any, any, any>[]> {
+
+async function loadMcpToolsFromUrl(mcpUrl: string): Promise<DynamicTool[]> {
   console.log(`Simulating loading tools from MCP server: ${mcpUrl}`);
   // In a real implementation, you'd make an HTTP request to `mcpUrl`
-  // to get tool definitions (name, description, input schema) and
-  // then create a Genkit Tool object. The tool's execute function
-  // would then make a call back to the MCP server to perform the action.
+  // to get tool definitions and create Langchain DynamicTool objects.
 
-  // For demonstration, let's return some mock tools based on the URL content.
   if (mcpUrl.includes('weather-service')) {
     return [
-      ai.defineTool(
-        {
-          name: 'getCurrentWeather',
-          description: 'Gets the current weather for a specified city.',
-          inputSchema: z.object({
-            city: z.string().describe('The name of the city.'),
-          }),
-          outputSchema: z.string(), // Simplified output for mock
+      new DynamicTool({
+        name: 'getCurrentWeather',
+        description: 'Gets the current weather for a specified city.',
+        func: async (input: { city: string }) => {
+            const { city } = input;
+            console.log(`Mock: Calling getCurrentWeather for ${city} via ${mcpUrl}`);
+            if (city.toLowerCase() === 'london') {
+                return 'It is sunny with a temperature of 20 degrees Celsius in London.';
+            } else if (city.toLowerCase() === 'paris') {
+                return 'It is cloudy with a temperature of 15 degrees Celsius in Paris.';
+            } else if (city.toLowerCase() === 'new york') {
+                return 'It is partly cloudy with a temperature of 25 degrees Celsius in New York.';
+            }
+            return `Could not find weather for ${city}.`;
         },
-        async (input) => {
-          console.log(`Mock: Calling getCurrentWeather for ${input.city} via ${mcpUrl}`);
-          // Simulate API call to MCP server for weather
-          if (input.city.toLowerCase() === 'london') {
-            return 'It is sunny with a temperature of 20 degrees Celsius in London.';
-          } else if (input.city.toLowerCase() === 'paris') {
-            return 'It is cloudy with a temperature of 15 degrees Celsius in Paris.';
-          } else if (input.city.toLowerCase() === 'new york') {
-            return 'It is partly cloudy with a temperature of 25 degrees Celsius in New York.';
-          }
-          return `Could not find weather for ${input.city}.`;
-        }
-      ),
-      ai.defineTool(
-        {
+        schema: z.object({ city: z.string().describe('The name of the city.') }),
+      }),
+      new DynamicTool({
           name: 'getForecast',
           description: 'Gets the weather forecast for a specified city and number of days (1-7).',
-          inputSchema: z.object({
+          func: async(input: {city: string, days: number}) => {
+              console.log(`Mock: Calling getForecast for ${input.city} for ${input.days} days via ${mcpUrl}`);
+              if (input.city.toLowerCase() === 'london') {
+                return `Forecast for London for ${input.days} days: Expect scattered showers and mild temperatures.`;
+              } else if (input.city.toLowerCase() === 'paris') {
+                return `Forecast for Paris for ${input.days} days: Expect cool, cloudy weather.`;
+              } else if (input.city.toLowerCase() === 'new york') {
+                return `Forecast for New York for ${input.days} days: Expect warm and clear skies.`;
+              }
+              return `Could not get forecast for ${input.city}.`;
+          },
+          schema: z.object({
             city: z.string().describe('The name of the city.'),
             days: z.number().int().min(1).max(7).describe('The number of days for the forecast.'),
           }),
-          outputSchema: z.string(),
-        },
-        async (input) => {
-          console.log(`Mock: Calling getForecast for ${input.city} for ${input.days} days via ${mcpUrl}`);
-          // Simulate API call to MCP server for forecast
-          if (input.city.toLowerCase() === 'london') {
-            return `Forecast for London for ${input.days} days: Expect scattered showers and mild temperatures.`;
-          } else if (input.city.toLowerCase() === 'paris') {
-            return `Forecast for Paris for ${input.days} days: Expect cool, cloudy weather.`;
-          } else if (input.city.toLowerCase() === 'new york') {
-            return `Forecast for New York for ${input.days} days: Expect warm and clear skies.`;
-          }
-          return `Could not get forecast for ${input.city}.`;
-        }
-      ),
+      }),
     ];
   } else if (mcpUrl.includes('stock-service')) {
     return [
-      ai.defineTool(
-        {
-          name: 'getStockPrice',
-          description: 'Retrieves the current stock price for a given ticker symbol.',
-          inputSchema: z.object({
-            ticker: z.string().describe('The stock ticker symbol (e.g., GOOGL, AAPL).'),
-          }),
-          outputSchema: z.number(),
+      new DynamicTool({
+        name: 'getStockPrice',
+        description: 'Retrieves the current stock price for a given ticker symbol.',
+        func: async (input: { ticker: string }) => {
+            const { ticker } = input;
+            console.log(`Mock: Calling getStockPrice for ${ticker} via ${mcpUrl}`);
+            switch (ticker.toUpperCase()) {
+                case 'GOOGL': return 1700.50;
+                case 'AAPL': return 180.25;
+                case 'MSFT': return 450.10;
+                default: return 0;
+            }
         },
-        async (input) => {
-          console.log(`Mock: Calling getStockPrice for ${input.ticker} via ${mcpUrl}`);
-          // Simulate API call to MCP server for stock price
-          switch (input.ticker.toUpperCase()) {
-            case 'GOOGL':
-              return 1700.50;
-            case 'AAPL':
-              return 180.25;
-            case 'MSFT':
-              return 450.10;
-            default:
-              return 0; // Not found
-          }
-        }
-      ),
+        schema: z.object({ ticker: z.string().describe('The stock ticker symbol (e.g., GOOGL, AAPL).') }),
+      }),
     ];
   }
-  return []; // No tools for unknown MCP URL
+  return [];
 }
 
-/**
- * Defines a Genkit flow that integrates dynamically loaded tools from MCP servers.
- * It allows the LLM to use these tools to answer user queries that require external data or actions.
- */
-const mcpServerToolIntegrationFlow = ai.defineFlow(
-  {
-    name: 'mcpServerToolIntegrationFlow',
-    inputSchema: McpServerToolIntegrationInputSchema,
-    outputSchema: McpServerToolIntegrationOutputSchema,
-  },
-  async (input) => {
-    // Dynamically load tools from provided MCP server URLs
-    let allTools: Tool<any, any, any>[] = [];
-    for (const url of input.mcpServerUrls) {
-      const tools = await loadMcpToolsFromUrl(url);
-      allTools = allTools.concat(tools);
-    }
 
-    // Prepare history for the LLM
-    const llmHistory = input.history?.map(entry => ({
-      role: entry.role as 'user' | 'model',
-      content: [{ text: entry.content }]
-    })) || [];
-
-
-    // Use the base model configured in src/ai/genkit.ts, or the one specified by the user
-    const model = ai.model(input.modelName || 'googleai/gemini-2.5-flash');
-
-    const chat = model.startChat({
-        history: llmHistory,
-        tools: allTools,
-        config: {
-            temperature: input.temperature,
-            maxOutputTokens: input.maxOutputTokens,
-            safetySettings: [
-                {
-                    category: 'HARM_CATEGORY_HATE_SPEECH',
-                    threshold: 'BLOCK_NONE',
-                },
-                {
-                    category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
-                    threshold: 'BLOCK_NONE',
-                },
-                {
-                    category: 'HARM_CATEGORY_HARASSMENT',
-                    threshold: 'BLOCK_NONE',
-                },
-                {
-                    category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
-                    threshold: 'BLOCK_NONE',
-                },
-            ]
-        },
-    });
-
-    const result = await chat.sendMessage(input.userMessage);
-
-    // Extract the textual response from the LLM.
-    const responseContent = result.text;
-
-    // Extract details about any tool calls made by the LLM for UI display.
-    const toolCalls = result.toolCalls?.map(tc => ({
-      name: tc.tool.name,
-      input: tc.input,
-    })) || [];
-
-    // Extract details about the outputs of any tool calls for UI display.
-    const toolOutputs = result.toolOutputs?.map(to => ({
-      toolCall: {
-        name: to.toolCall.tool.name,
-        input: to.toolCall.input,
-      },
-      output: to.output,
-    })) || [];
-
-    return {
-      response: responseContent,
-      toolCalls,
-      toolOutputs,
-    };
-  }
-);
-
-/**
- * Wrapper function to execute the MCP Server Tool Integration Genkit flow.
- * This function can be called directly from Next.js React code.
- * @param input The input for the flow, including user message, MCP server URLs, and optional model config.
- * @returns A promise that resolves to the LLM's response and tool interaction details.
- */
 export async function mcpServerToolIntegration(input: McpServerToolIntegrationInput): Promise<McpServerToolIntegrationOutput> {
-  return mcpServerToolIntegrationFlow(input);
+    const { userMessage, mcpServerUrls, modelName, temperature, maxOutputTokens, history } = input;
+    
+    try {
+        let allTools: DynamicTool[] = [];
+        for (const url of mcpServerUrls) {
+            const tools = await loadMcpToolsFromUrl(url);
+            allTools = allTools.concat(tools);
+        }
+
+        let lcModelName = 'gemini-1.5-flash-latest';
+        if (modelName === 'googleai/gemini-2.5-pro') {
+            lcModelName = 'gemini-1.5-pro-latest';
+        }
+
+        const model = new ChatGoogleGenerativeAI({
+            modelName: lcModelName,
+            temperature,
+            maxOutputTokens,
+            apiKey: process.env.GOOGLE_API_KEY,
+        });
+
+        const modelWithTools = model.bindTools(allTools);
+
+        const chatHistory = (history || []).map(turn => {
+            return turn.role === 'user' ? new HumanMessage(turn.content) : new AIMessage(turn.content);
+        });
+
+        const fullHistory = [...chatHistory, new HumanMessage(userMessage)];
+
+        const result = await modelWithTools.invoke(fullHistory);
+
+        const toolCallsForUI: { name: string; input: any; }[] = [];
+        const toolOutputsForLLM: ToolMessage[] = [];
+        const toolOutputsForUI: { name: string; input: any; output: any }[] = [];
+
+
+        if (result.tool_calls) {
+            for (const toolCall of result.tool_calls) {
+                const tool = allTools.find(t => t.name === toolCall.name);
+                if (tool) {
+                    toolCallsForUI.push({ name: tool.name, input: toolCall.args });
+                    const output = await tool.invoke(toolCall.args);
+                    toolOutputsForUI.push({ name: tool.name, input: toolCall.args, output });
+                    toolOutputsForLLM.push(new ToolMessage({ tool_call_id: toolCall.id!, content: JSON.stringify(output)}));
+                }
+            }
+        }
+
+        let finalResponse = result.content as string;
+        if (toolOutputsForLLM.length > 0) {
+            fullHistory.push(...toolOutputsForLLM);
+            const finalResult = await modelWithTools.invoke(fullHistory);
+            finalResponse = finalResult.content as string;
+        }
+
+        return {
+            response: finalResponse,
+            toolCalls: toolCallsForUI,
+            toolOutputs: toolOutputsForUI,
+        };
+    } catch (e: any) {
+        console.error("LangChain Error:", e);
+        throw new Error(`AI model call failed: ${e.message}. This may be due to an invalid API key or network issues.`);
+    }
 }

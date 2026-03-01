@@ -1,14 +1,15 @@
 'use server';
 /**
- * @fileOverview This file implements a Genkit flow for interactive chat with a Gemini LLM.
+ * @fileOverview This file implements a LangChain flow for interactive chat with a Gemini LLM.
  *
  * - geminiChatInteraction - A function that handles a single turn of a chat conversation.
  * - ChatInteractionInput - The input type for the geminiChatInteraction function, including message, history, model, and temperature.
  * - ChatInteractionOutput - The return type for the geminiChatInteraction function, including the LLM's response and updated history.
  */
 
-import { ai } from '@/ai/genkit';
-import { z } from 'genkit';
+import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
+import { HumanMessage, AIMessage } from "@langchain/core/messages";
+import { z } from 'zod';
 
 const ChatInteractionInputSchema = z.object({
   message: z.string().describe('The current message from the user.'),
@@ -28,60 +29,34 @@ const ChatInteractionOutputSchema = z.object({
 });
 export type ChatInteractionOutput = z.infer<typeof ChatInteractionOutputSchema>;
 
-const geminiChatInteractionFlow = ai.defineFlow(
-  {
-    name: 'geminiChatInteractionFlow',
-    inputSchema: ChatInteractionInputSchema,
-    outputSchema: ChatInteractionOutputSchema,
-  },
-  async (input) => {
-    const { message, history, modelName, temperature } = input;
+export async function geminiChatInteraction(
+  input: ChatInteractionInput
+): Promise<ChatInteractionOutput> {
+  const { message, history, modelName, temperature } = input;
 
-    // Convert history to the format expected by Genkit's `history` option
-    const llmHistory = history.map(turn => ({
-      role: turn.role as 'user' | 'model',
-      content: [{ text: turn.content }]
-    }));
+  // Map the model name from settings to the name LangChain expects.
+  let lcModelName = 'gemini-1.5-flash-latest';
+  if (modelName === 'googleai/gemini-2.5-pro') {
+    lcModelName = 'gemini-1.5-pro-latest';
+  }
 
-    // Ensure the model name has the 'googleai/' prefix to avoid errors with old stored settings.
-    const fullModelName = modelName.startsWith('googleai/') ? modelName : `googleai/${modelName}`;
-
-    const chat = ai.model(fullModelName).startChat({
-      history: llmHistory,
-      config: {
-        temperature: temperature,
-        safetySettings: [
-            {
-                category: 'HARM_CATEGORY_HATE_SPEECH',
-                threshold: 'BLOCK_NONE',
-            },
-            {
-                category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
-                threshold: 'BLOCK_NONE',
-            },
-            {
-                category: 'HARM_CATEGORY_HARASSMENT',
-                threshold: 'BLOCK_NONE',
-            },
-            {
-                category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
-                threshold: 'BLOCK_NONE',
-            },
-        ]
-      },
+  try {
+    const model = new ChatGoogleGenerativeAI({
+      modelName: lcModelName,
+      temperature,
+      apiKey: process.env.GOOGLE_API_KEY,
     });
 
-    const response = await chat.sendMessage(message);
+    const chatHistory = history.map(turn => {
+      return turn.role === 'user' ? new HumanMessage(turn.content) : new AIMessage(turn.content);
+    });
 
-    if (!response.output) {
-      // This error is thrown if the LLM response is blocked or empty.
-      // This could be due to safety settings, or an issue with the API key.
-      throw new Error('LLM did not return a response. This may be due to safety settings or an invalid API key.');
-    }
+    const fullHistory = [...chatHistory, new HumanMessage(message)];
 
-    const llmResponse = response.text;
+    const result = await model.invoke(fullHistory);
 
-    // Update history with the user's message and the LLM's response
+    const llmResponse = result.content as string;
+
     const newHistory: Array<{ role: 'user' | 'model', content: string }> = [
       ...history,
       { role: 'user', content: message },
@@ -92,11 +67,9 @@ const geminiChatInteractionFlow = ai.defineFlow(
       response: llmResponse,
       newHistory: newHistory,
     };
+  } catch (e: any) {
+    console.error("LangChain Error:", e);
+    // Re-throw a more user-friendly error.
+    throw new Error(`AI model call failed: ${e.message}. This may be due to an invalid API key or network issues.`);
   }
-);
-
-export async function geminiChatInteraction(
-  input: ChatInteractionInput
-): Promise<ChatInteractionOutput> {
-  return geminiChatInteractionFlow(input);
 }
