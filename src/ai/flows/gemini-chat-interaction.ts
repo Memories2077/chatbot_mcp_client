@@ -35,16 +35,16 @@ export async function geminiChatInteraction(
   const { message, history, modelName, temperature } = input;
 
   // Map the model name from settings to the name LangChain expects.
-  let lcModelName = 'gemini-1.5-flash-latest';
+  let lcModelName = 'gemini-2.5-flash-latest';
   if (modelName === 'googleai/gemini-2.5-pro') {
     lcModelName = 'gemini-1.5-pro-latest';
   }
 
   try {
     const model = new ChatGoogleGenerativeAI({
-      modelName: lcModelName,
+      modelName: 'gemini-2.5-flash',
       temperature,
-      apiKey: process.env.GOOGLE_API_KEY,
+      apiKey: process.env.GEMINI_API_KEY,
     });
 
     const chatHistory = history.map(turn => {
