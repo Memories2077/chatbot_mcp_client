@@ -189,11 +189,29 @@ const mcpServerToolIntegrationFlow = ai.defineFlow(
       config: {
         temperature: input.temperature,
         maxOutputTokens: input.maxOutputTokens,
+        safetySettings: [
+            {
+                category: 'HARM_CATEGORY_HATE_SPEECH',
+                threshold: 'BLOCK_NONE',
+            },
+            {
+                category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
+                threshold: 'BLOCK_NONE',
+            },
+            {
+                category: 'HARM_CATEGORY_HARASSMENT',
+                threshold: 'BLOCK_NONE',
+            },
+            {
+                category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
+                threshold: 'BLOCK_NONE',
+            },
+        ]
       },
     });
 
     // Extract the textual response from the LLM.
-    const responseContent = result.text();
+    const responseContent = result.text;
 
     // Extract details about any tool calls made by the LLM for UI display.
     const toolCalls = result.toolCalls?.map(tc => ({

@@ -49,6 +49,24 @@ const geminiChatInteractionFlow = ai.defineFlow(
       prompt: message, // The current user message is the direct prompt to the LLM
       config: {
         temperature: temperature,
+        safetySettings: [
+            {
+                category: 'HARM_CATEGORY_HATE_SPEECH',
+                threshold: 'BLOCK_NONE',
+            },
+            {
+                category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
+                threshold: 'BLOCK_NONE',
+            },
+            {
+                category: 'HARM_CATEGORY_HARASSMENT',
+                threshold: 'BLOCK_NONE',
+            },
+            {
+                category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
+                threshold: 'BLOCK_NONE',
+            },
+        ]
       },
     });
 
@@ -56,7 +74,7 @@ const geminiChatInteractionFlow = ai.defineFlow(
       throw new Error('LLM did not return a response.');
     }
 
-    const llmResponse = response.text();
+    const llmResponse = response.text;
 
     // Update history with the user's message and the LLM's response
     const newHistory: ChatTurn[] = [
