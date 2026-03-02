@@ -79,6 +79,10 @@ wheels/
 *.egg
 MANIFEST
 
+# Allow tracking of frontend/server source `src/lib` (un-ignore)
+!src/lib/
+!src/lib/**
+
 # PyInstaller
 *.manifest
 *.spec
