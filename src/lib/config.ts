@@ -1,16 +1,21 @@
 // Configuration for API endpoints
 export const getBackendUrl = (): string => {
-    if (typeof window !== 'undefined') {
-        // Client-side: use environment variable or fallback to window location
-        return (
-        process.env.NEXT_PUBLIC_BACKEND_URL ||
-        `${window.location.protocol}//${window.location.hostname}:8000`
-        );
+    // Docker mode: A full URL is provided at build time.
+    if (process.env.NEXT_PUBLIC_BACKEND_URL) {
+        return process.env.NEXT_PUBLIC_BACKEND_URL;
     }
-    // Server-side fallback (Docker internal network or local dev)
-    // When running in a container, backend is reachable as 'backend'
-    const port = process.env.BACKEND_PORT || '8000';
-    return process.env.NEXT_PUBLIC_BACKEND_URL || `http://backend:${port}`;
+
+    // Local development mode: Construct the URL from a port number.
+    // Note: This requires NEXT_PUBLIC_BACKEND_PORT in your local .env file.
+    const port = process.env.NEXT_PUBLIC_BACKEND_PORT || '8000';
+
+    if (typeof window !== 'undefined') {
+        // Client-side (Local Dev): construct from hostname and port.
+        return `${window.location.protocol}//${window.location.hostname}:${port}`;
+    }
+
+    // Server-side (Local Dev, for SSR): construct from localhost and port.
+    return `http://localhost:${port}`;
 };
 
 export const BACKEND_API = {

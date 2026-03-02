@@ -18,6 +18,13 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from dotenv import load_dotenv
 load_dotenv()
 
+# For local development, read the port from .env and ensure it's a valid integer.
+# This is ignored in Docker, which uses the 'command' from docker-compose.yml.
+try:
+    backend_port = int(os.getenv("NEXT_PUBLIC_BACKEND_PORT", "8000"))
+except (ValueError, TypeError):
+    backend_port = 8000
+
 app = FastAPI()
 
 app.add_middleware(
@@ -199,4 +206,4 @@ async def chat_endpoint(request: ChatRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=backend_port)

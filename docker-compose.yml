@@ -7,21 +7,21 @@ services:
       context: .
       dockerfile: Dockerfile.backend
       args:
-        - BACKEND_PORT=${BACKEND_PORT:-8000}
+        - NEXT_PUBLIC_BACKEND_PORT=${NEXT_PUBLIC_BACKEND_PORT:-8000}
     container_name: gemini-backend
     environment:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - PYTHONUNBUFFERED=1
-      - BACKEND_PORT=${BACKEND_PORT:-8000}
+      - NEXT_PUBLIC_BACKEND_PORT=${NEXT_PUBLIC_BACKEND_PORT:-8000}
     ports:
-      - "${BACKEND_PORT:-8000}:${BACKEND_PORT:-8000}"
+      - "${NEXT_PUBLIC_BACKEND_PORT:-8000}:${NEXT_PUBLIC_BACKEND_PORT:-8000}"
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import requests,sys; r=requests.get('http://localhost:${BACKEND_PORT:-8000}/health'); sys.exit(0 if 200 <= r.status_code < 400 else 1)\""]
+      test: ["CMD-SHELL", "python -c \"import requests,sys; r=requests.get('http://localhost:${NEXT_PUBLIC_BACKEND_PORT:-8000}/health'); sys.exit(0 if 200 <= r.status_code < 400 else 1)\""]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 5s
-    command: uvicorn main:app --host 0.0.0.0 --port ${BACKEND_PORT:-8000}
+    command: uvicorn main:app --host 0.0.0.0 --port ${NEXT_PUBLIC_BACKEND_PORT:-8000}
     restart: unless-stopped
     networks:
       - gemini-network
@@ -33,9 +33,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.frontend
+      args:
+        - NEXT_PUBLIC_BACKEND_URL=http://localhost:${NEXT_PUBLIC_BACKEND_PORT:-8000}
     container_name: gemini-frontend
     environment:
-      - NEXT_PUBLIC_BACKEND_URL=http://backend:${BACKEND_PORT:-8000}
+      - NEXT_PUBLIC_BACKEND_URL=http://localhost:${NEXT_PUBLIC_BACKEND_PORT:-8000}
       - NODE_ENV=production
     ports:
       - "9002:9002"
