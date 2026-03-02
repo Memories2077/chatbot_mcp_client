@@ -1,0 +1,30 @@
+# Backend Dockerfile - FastAPI
+FROM python:3.11-slim
+
+WORKDIR /app/backend
+
+# Build argument for flexible port configuration (overwritten bn usage of docker-compose)
+ARG BACKEND_PORT=8000
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install dependencies
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy backend code
+COPY backend/ .
+
+# Expose port (flexible - set via ARG)
+EXPOSE ${BACKEND_PORT}
+
+# Health check (port determined at build time via ARG)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import requests; requests.get('http://localhost:${BACKEND_PORT}/health')" || exit 1
+
+# No default CMD specified. The runtime command and port are supplied by docker-compose
+# If running standalone, use something like:
+#   docker run -e BACKEND_PORT=8000 image_name uvicorn main:app --host 0.0.0.0 --port $BACKEND_PORT
