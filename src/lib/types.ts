@@ -4,6 +4,7 @@ export interface ChatMessage {
   id: string;
   role: ChatRole;
   content: string;
+  timestamp: string; // ISO format string
   toolCallId?: string;
   name?: string;
   toolCalls?: {

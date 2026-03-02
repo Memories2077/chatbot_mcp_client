@@ -8,7 +8,6 @@ import { BACKEND_API } from '@/lib/config';
 
 interface ChatState {
   messages: ChatMessage[];
-  historyForLLM: { role: 'user' | 'model'; content: string }[];
   settings: ChatSettings;
   isLoading: boolean;
   sendMessage: (text: string, settings?: ChatSettings) => void;
@@ -28,7 +27,6 @@ export const useChatStore = create<ChatState>()(
   persist(
     (set, get) => ({
       messages: [],
-      historyForLLM: [],
       settings: defaultSettings,
       isLoading: false,
 
@@ -37,32 +35,41 @@ export const useChatStore = create<ChatState>()(
       addMessage: (message) => set((state) => ({ messages: [...state.messages, message] })),
 
       clearMessages: () => {
-        console.log("Clearing all messages and LLM history.");
-        set({ messages: [], historyForLLM: [] });
+        console.log("Clearing all messages.");
+        set({ messages: [] });
       },
 
-      sendMessage: async (text, settings) => {
-        const { historyForLLM } = get();
+      sendMessage: async (text, overrideSettings) => {
+        const { messages, settings: currentSettings } = get();
+        const settings = overrideSettings || currentSettings;
         set({ isLoading: true });
 
+        const now = new Date().toISOString();
         const userMessage: ChatMessage = {
           id: uuidv4(),
           role: 'user',
           content: text,
+          timestamp: now,
         };
-        set((state) => ({ messages: [...state.messages, userMessage] }));
 
-        const newHistory = [...historyForLLM, { role: 'user' as const, content: text }];
+        const updatedMessages = [...messages, userMessage];
+        set({ messages: updatedMessages });
+
+        // Transform messages for LLM with Index and Timestamp
+        const historyForBackend = updatedMessages.map((msg, index) => ({
+          role: msg.role === 'model' ? 'model' : 'user',
+          content: `[Turn ${index}][${msg.timestamp}] ${msg.content}`
+        }));
 
         try {
           const response = await fetch(BACKEND_API.chat(), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              messages: newHistory,
+              messages: historyForBackend,
               model: settings?.model,
               temperature: settings?.temperature,
-              mcpServers: settings?.mcpServers.map(s => s.url)
+              mcpServers: settings?.mcpServers?.map(s => s.url) || []
             })
           });
 
@@ -76,10 +83,10 @@ export const useChatStore = create<ChatState>()(
             id: uuidv4(),
             role: 'model',
             content: data.response,
+            timestamp: new Date().toISOString(),
           };
           set((state) => ({ 
-            messages: [...state.messages, modelMessage],
-            historyForLLM: [...newHistory, { role: 'model' as const, content: data.response }]
+            messages: [...state.messages, modelMessage]
           }));
           
         } catch (error: any) {
@@ -90,6 +97,7 @@ export const useChatStore = create<ChatState>()(
             id: uuidv4(),
             role: 'system',
             content: errorMessageText,
+            timestamp: new Date().toISOString(),
           };
           set((state) => ({ messages: [...state.messages, errorMessage] }));
         } finally {
