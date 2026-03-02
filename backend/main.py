@@ -138,18 +138,27 @@ async def get_or_create_agent(model_name: str, mcp_urls: List[str], temperature:
                 print(f"Failed to load tools: {e}")
 
     if all_tools:
+        print('Using agents with tools...')
         state.agent = create_agent(llm, all_tools)
     else:
+        print('No tools provided, using basic model...')
         state.agent = llm
 
     state.current_model = model_name
     state.current_mcp_urls = mcp_urls.copy()
     return state.agent
 
-SYSTEM_PROMPT = """You are a helpful and intelligent AI assistant. 
-The conversation history is provided in chronological order (from oldest to newest). 
-Always refer to the most recent messages to maintain context. 
-You have access to MCP tools provided in the current session to assist the user."""
+def get_system_prompt(has_tools: bool, mcp_urls: List[str], last_turn_index: int):
+    base = f"""You are a helpful and intelligent AI assistant. 
+The conversation history is provided with [Turn Index] and [Timestamp] for each message. 
+The current message is [Turn {last_turn_index}].
+Always prioritize the latest information and the current configuration state over historical turns."""
+    
+    if has_tools:
+        tools_list = ", ".join(mcp_urls) if mcp_urls else "active sessions"
+        return f"{base}\n\nCURRENT STATUS (Turn {last_turn_index}): MCP Tools are ENABLED. You have access to: {tools_list}. Use them if the user request requires real-time or external data."
+    else:
+        return f"{base}\n\nCURRENT STATUS (Turn {last_turn_index}): MCP Tools are DISABLED. No external tools or files are available in this turn. You MUST answer based ONLY on your internal knowledge. Do NOT attempt to use tools or mention that you might have them in the future unless the user adds them."""
 
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
@@ -160,8 +169,14 @@ async def chat_endpoint(request: ChatRequest):
             temperature=request.temperature
         )
 
+        # Check if the agent is actually an agent with tools or just the LLM
+        has_tools = hasattr(agent, "ainvoke") and not isinstance(agent, ChatGoogleGenerativeAI)
+        
+        last_turn_index = len(request.messages) - 1
+        dynamic_prompt = get_system_prompt(has_tools, state.current_mcp_urls, last_turn_index)
+
         from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-        langchain_msgs = [SystemMessage(content=SYSTEM_PROMPT)]
+        langchain_msgs = [SystemMessage(content=dynamic_prompt)]
         for msg in request.messages:
             if msg.role == "user":
                 langchain_msgs.append(HumanMessage(content=msg.content))
