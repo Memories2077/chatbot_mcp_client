@@ -43,3 +43,82 @@ next-env.d.ts
 # firebase
 firebase-debug.log
 firestore-debug.log
+
+# =========================
+# Python
+# =========================
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.env/
+.venv/
+env/
+ENV/
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.pytest_cache/
+
+# Type checkers
+.mypy_cache/
+.dmypy.json
+.pyre/
+.pytype/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# VSCode / IDE
+.vscode/
+.idea/
+
+# Environment variables
+.env
+.env.*
+
+# SQLite
+*.sqlite3
+db.sqlite3
+
+# Logs
+*.log
