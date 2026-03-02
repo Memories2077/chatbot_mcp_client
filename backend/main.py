@@ -28,6 +28,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Docker/K8s"""
+    try:
+        api_key = os.getenv("GEMINI_API_KEY", "")
+        if not api_key:
+            return {"status": "unhealthy", "detail": "GEMINI_API_KEY not set"}
+        return {"status": "healthy", "service": "backend"}
+    except Exception as e:
+        return {"status": "unhealthy", "detail": str(e)}
+
 class CustomEncoder(json.JSONEncoder):
     def default(self, o):
         if hasattr(o, "content"):

@@ -103,7 +103,69 @@ python main.py
 
 Backend sẽ chạy tại `http://localhost:8000`
 
-> **Lưu ý:** Cập nhật endpoint API trong [use-chat-store.ts](src/lib/hooks/use-chat-store.ts#L55) nếu backend chạy trên địa chỉ khác.
+> **Lưu ý:** Endpoint API đã được cập nhật để sử dụng environment variable `NEXT_PUBLIC_BACKEND_URL`.
+
+## 🐳 Triển Khai với Docker
+
+### Yêu Cầu
+- Docker & Docker Compose
+
+### Bước 1: Chuẩn Bị Environment
+
+```bash
+# Copy file env từ template
+cp .env.example .env
+
+# Chỉnh sửa .env và thêm Gemini API Key của bạn
+# GEMINI_API_KEY=your_actual_key_here
+```
+
+### Bước 2: Khởi Động Các Dịch Vụ
+
+```bash
+# Build và start tất cả services
+docker-compose up -d
+
+# Xem logs
+docker-compose logs -f
+```
+
+### Bước 3: Truy Cập Ứng Dụng
+
+- **Frontend**: http://localhost:9002
+- **Backend**: http://localhost:8000
+- **Health Check**: http://localhost:8000/health
+
+### Tính Năng Docker
+
+✅ **Multi-stage Build** - Optimized production images  
+✅ **Health Checks** - Automatic service monitoring  
+✅ **Dependency Management** - Frontend waits for Backend to be healthy  
+✅ **Hot Reload** - Development mode với live reloading  
+✅ **Network Isolation** - Docker network cho inter-service communication  
+
+### Lệnh Hữu Ích
+
+```bash
+# Xem trạng thái services
+docker-compose ps
+
+# Dừng services
+docker-compose down
+
+# Rebuild sau khi thay đổi code
+docker-compose up -d --build
+
+# Logs của service cụ thể
+docker-compose logs -f backend
+docker-compose logs -f frontend
+
+# Shell vào container
+docker-compose exec backend bash
+docker-compose exec frontend sh
+```
+
+📖 **Chi tiết hơn**: Xem [DOCKER.md](DOCKER.md) để hướng dẫn đầy đủ.
 
 ## 📦 Tech Stack
 
