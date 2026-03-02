@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { v4 as uuidv4 } from 'uuid';
 import type { ChatMessage, ChatSettings } from '@/lib/types';
+import { BACKEND_API } from '@/lib/config';
 
 interface ChatState {
   messages: ChatMessage[];
@@ -54,7 +55,7 @@ export const useChatStore = create<ChatState>()(
         const newHistory = [...historyForLLM, { role: 'user' as const, content: text }];
 
         try {
-          const response = await fetch('http://100.78.98.117:8000/chat', {
+          const response = await fetch(BACKEND_API.chat(), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -83,7 +84,8 @@ export const useChatStore = create<ChatState>()(
           
         } catch (error: any) {
           console.error("Error calling AI flow:", error);
-          const errorMessageText = error.message || "Sorry, I encountered an unknown error connecting to the Python backend. Make sure it's running on http://100.78.98.117:8000.";
+          const backendUrl = BACKEND_API.chat();
+          const errorMessageText = error.message || `Sorry, I encountered an unknown error connecting to the backend at ${backendUrl}. Make sure it's running.`;
           const errorMessage: ChatMessage = {
             id: uuidv4(),
             role: 'system',
