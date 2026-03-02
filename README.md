@@ -2,6 +2,8 @@
 
 Một ứng dụng chatbot hiện đại được xây dựng với **Next.js** (Frontend) và **FastAPI** (Backend), tích hợp Google Gemini AI với khả năng kết nối các máy chủ MCP (Model Context Protocol) để thực thi công cụ động.
 
+![Gemini InsightLink Preview](img/image.png)
+
 ## ✨ Các Tính Năng Chính
 
 ### 💬 Giao Diện Chat Tương Tác
