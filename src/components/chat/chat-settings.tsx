@@ -142,7 +142,7 @@ export function ChatSettings({ settings, setSettings }: ChatSettingsProps) {
                     render={({ field }) => (
                         <FormItem>
                             <FormLabel>Max Tokens: {field.value}</FormLabel>
-                             <FormControl>
+                              <FormControl>
                                 <Slider
                                 value={[field.value]}
                                 onValueChange={(value) => field.onChange(value[0])}
@@ -181,7 +181,7 @@ export function ChatSettings({ settings, setSettings }: ChatSettingsProps) {
                             }
                         }}
                     />
-                     {form.formState.errors.mcpServers && <FormMessage className='mt-2'>{form.formState.errors.mcpServers.message}</FormMessage>}
+                      {form.formState.errors.mcpServers && <FormMessage className='mt-2'>{form.formState.errors.mcpServers.message}</FormMessage>}
                   </div>
                 <Button type="button" variant="outline" size="icon" onClick={handleAddMcpServer}>
                   <Icons.add className="h-4 w-4" />

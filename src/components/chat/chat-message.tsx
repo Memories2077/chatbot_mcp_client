@@ -1,5 +1,4 @@
-"use client";
-
+import * as React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
@@ -12,7 +11,7 @@ interface ChatMessageProps {
   isLoading?: boolean;
 }
 
-export function ChatMessage({ message, isLoading }: ChatMessageProps) {
+const ChatMessage = React.memo(({ message, isLoading }: ChatMessageProps) => {
   const role = isLoading ? 'model' : message!.role;
   const content = isLoading ? '...' : message!.content;
   
@@ -84,4 +83,8 @@ export function ChatMessage({ message, isLoading }: ChatMessageProps) {
       )}
     </div>
   );
-}
+});
+
+ChatMessage.displayName = 'ChatMessage';
+
+export { ChatMessage };
