@@ -6,41 +6,27 @@ import { useChatStore } from '@/lib/hooks/use-chat-store';
 import { Button } from '@/components/ui/button';
 import { ChatMessage } from '@/components/chat/chat-message';
 import { ChatSettings } from '@/components/chat/chat-settings';
+import { ChatInput } from '@/components/chat/chat-input';
 import { Icons } from '@/components/icons';
-import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 
 export function ChatLayout() {
   const {
     messages,
-    sendMessage,
     isLoading,
     settings,
     setSettings,
     clearMessages,
   } = useChatStore((state) => ({
     messages: state.messages,
-    sendMessage: state.sendMessage,
     isLoading: state.isLoading,
     settings: state.settings,
     setSettings: state.setSettings,
     clearMessages: state.clearMessages,
   }));
 
-  const [input, setInput] = React.useState('');
-  const [isComposing, setIsComposing] = React.useState(false);
-  const inputRef = React.useRef<HTMLTextAreaElement>(null);
   const scrollAreaRef = React.useRef<React.ElementRef<typeof ScrollArea>>(null);
-
-  // Auto-resize textarea
-  React.useEffect(() => {
-    if (inputRef.current) {
-      inputRef.current.style.height = 'auto';
-      inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 200)}px`;
-    }
-  }, [input]);
 
   React.useEffect(() => {
     // Scroll to the bottom when a new message is added
@@ -51,13 +37,6 @@ export function ChatLayout() {
         }
     }
   }, [messages]);
-  
-  const handleSubmit = (e?: React.FormEvent<HTMLFormElement> | React.KeyboardEvent) => {
-    if (e) e.preventDefault();
-    if (!input.trim() || isLoading || isComposing) return;
-    sendMessage(input, settings);
-    setInput('');
-  };
 
   return (
     <div className="relative flex h-screen w-full flex-col">
@@ -87,7 +66,7 @@ export function ChatLayout() {
       <ScrollArea className="flex-1" ref={scrollAreaRef}>
         <AnimatePresence>
             <div className="mx-auto max-w-4xl w-full p-4 md:p-6">
-                {messages.map((message, index) => (
+                {messages.map((message) => (
                     <motion.div
                         key={message.id}
                         layout
@@ -116,44 +95,7 @@ export function ChatLayout() {
         </AnimatePresence>
       </ScrollArea>
       
-      <div className="w-full shrink-0 border-t bg-background">
-        <form
-          onSubmit={(e) => handleSubmit(e)}
-          className="mx-auto flex max-w-4xl w-full items-end gap-2 p-4"
-        >
-          <div className="relative flex-1">
-            <Textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onCompositionStart={() => setIsComposing(true)}
-              onCompositionEnd={() => setIsComposing(false)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  if (isComposing) return;
-                  e.preventDefault();
-                  handleSubmit();
-                }
-              }}
-              placeholder="Type your message..."
-              className="min-h-[48px] resize-none pr-12"
-              rows={1}
-              style={{maxHeight: '200px'}}
-            />
-            <Button
-              type="submit"
-              size="icon"
-              className={cn("absolute right-3 top-1/2 -translate-y-1/2", {
-                "bg-primary/50": isLoading
-              })}
-              disabled={isLoading || !input.trim()}
-              aria-label="Send message"
-            >
-              <Icons.send className="h-4 w-4" />
-            </Button>
-          </div>
-        </form>
-      </div>
+      <ChatInput />
     </div>
   );
 }
