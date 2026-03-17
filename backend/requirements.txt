@@ -9,3 +9,4 @@ langchain-groq
 langgraph
 python-dotenv
 requests
+flask
