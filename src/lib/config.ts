@@ -22,3 +22,26 @@ export const BACKEND_API = {
     chat: () => `${getBackendUrl()}/chat`,
     health: () => `${getBackendUrl()}/health`,
 };
+
+export const MODEL_CONFIG = {
+  gemini: {
+    defaultModel: 'gemini-2.5-flash',
+    models: ['gemini-2.5-flash', 'gemini-2.5-pro'],
+  },
+  groq: {
+    defaultModel: 'llama-3.3-70b-versatile',
+    models: [
+      'meta-llama/llama-4-scout-17b-16e-instruct',
+      'moonshotai/kimi-k2-instruct',
+      'moonshotai/kimi-k2-instruct-0905',
+      'allam-2-7b',
+      'llama-3.1-8b-instant',
+      'llama-3.3-70b-versatile',
+      'qwen/qwen3-32b',
+      'openai/gpt-oss-120b',
+      'openai/gpt-oss-20b',
+      'groq/compound',
+      'groq/compound-mini',
+    ],
+  },
+};

@@ -22,13 +22,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Slider } from '@/components/ui/slider';
 import type { ChatSettings } from '@/lib/types';
 import { Separator } from '../ui/separator';
+import { MODEL_CONFIG } from '@/lib/config';
 
 interface ChatSettingsProps {
   settings: ChatSettings;
-  setSettings: (settings: ChatSettings) => void;
+  setSettings: (settings: Partial<ChatSettings>) => void;
 }
 
 const settingsSchema = z.object({
+  provider: z.enum(['gemini', 'groq']),
   model: z.string(),
   temperature: z.number().min(0).max(1),
   maxTokens: z.number().min(1),
@@ -49,6 +51,9 @@ export function ChatSettings({ settings, setSettings }: ChatSettingsProps) {
   });
 
   const [newMcpUrl, setNewMcpUrl] = React.useState('');
+
+  // Watch for provider changes to update the UI
+  const provider = form.watch('provider');
 
   React.useEffect(() => {
     form.reset(settings);
@@ -71,6 +76,8 @@ export function ChatSettings({ settings, setSettings }: ChatSettingsProps) {
     }
   };
 
+  const apiKeyName = provider === 'gemini' ? 'GEMINI_API_KEY' : 'GROQ_API_KEY';
+
   return (
     <Sheet open={isOpen} onOpenChange={setIsOpen}>
       <SheetTrigger asChild>
@@ -89,7 +96,7 @@ export function ChatSettings({ settings, setSettings }: ChatSettingsProps) {
             <div className="space-y-4">
               <h3 className="font-medium">API Configuration</h3>
               <div className='p-4 rounded-lg border border-yellow-500/50 bg-yellow-500/10 text-yellow-300 text-sm'>
-                Your <code className='font-semibold text-yellow-200'>GEMINI_API_KEY</code> must be set as an environment variable in a <code className='font-semibold text-yellow-200'>.env.local</code> file in the root of this project. The app will not function without it.
+                Your <code className='font-semibold text-yellow-200'>{apiKeyName}</code> must be set as an environment variable in a <code className='font-semibold text-yellow-200'>.env.local</code> file in the root of this project.
               </div>
             </div>
 
@@ -98,20 +105,48 @@ export function ChatSettings({ settings, setSettings }: ChatSettingsProps) {
             <div className="space-y-4">
                 <h3 className="font-medium">Model Configuration</h3>
                 <FormField
+                  control={form.control}
+                  name="provider"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Provider</FormLabel>
+                      <Select
+                        onValueChange={(value: 'gemini' | 'groq') => {
+                          field.onChange(value);
+                          // This leverages the logic in the zustand store to reset the model
+                          setSettings({ provider: value });
+                        }}
+                        defaultValue={field.value}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select a provider" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="gemini">Google Gemini</SelectItem>
+                          <SelectItem value="groq">Groq</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </FormItem>
+                  )}
+                />
+                <FormField
                 control={form.control}
                 name="model"
                 render={({ field }) => (
                     <FormItem>
-                    <FormLabel>Gemini Model</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <FormLabel>Model</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                         <SelectTrigger>
                             <SelectValue placeholder="Select a model" />
                         </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                        <SelectItem value="gemini-2.5-flash">gemini-2.5-flash</SelectItem>
-                        <SelectItem value="gemini-2.5-pro">gemini-2.5-pro</SelectItem>
+                          {MODEL_CONFIG[provider]?.models.map(model => (
+                            <SelectItem key={model} value={model}>{model}</SelectItem>
+                          ))}
                         </SelectContent>
                     </Select>
                     </FormItem>
