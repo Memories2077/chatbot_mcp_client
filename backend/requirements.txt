@@ -5,6 +5,7 @@ mcp
 langchain
 langchain-mcp-adapters
 langchain-google-genai
+langchain-groq
 langgraph
 python-dotenv
 requests

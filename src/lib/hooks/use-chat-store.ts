@@ -4,19 +4,20 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { v4 as uuidv4 } from 'uuid';
 import type { ChatMessage, ChatSettings } from '@/lib/types';
-import { BACKEND_API } from '@/lib/config';
+import { BACKEND_API, MODEL_CONFIG } from '@/lib/config';
 
 interface ChatState {
   messages: ChatMessage[];
   settings: ChatSettings;
   isLoading: boolean;
   sendMessage: (text: string, settings?: ChatSettings) => void;
-  setSettings: (settings: ChatSettings) => void;
+  setSettings: (settings: Partial<ChatSettings>) => void;
   addMessage: (message: ChatMessage) => void;
   clearMessages: () => void;
 }
 
 const defaultSettings: ChatSettings = {
+  provider: 'gemini',
   model: 'gemini-2.5-flash',
   temperature: 0.7,
   maxTokens: 2048,
@@ -30,7 +31,17 @@ export const useChatStore = create<ChatState>()(
       settings: defaultSettings,
       isLoading: false,
 
-      setSettings: (settings) => set({ settings }),
+      setSettings: (newSettings) => {
+        const currentSettings = get().settings;
+        const updatedSettings = { ...currentSettings, ...newSettings };
+
+        // If provider changed, update model to the default for that provider
+        if (newSettings.provider && newSettings.provider !== currentSettings.provider) {
+          updatedSettings.model = MODEL_CONFIG[newSettings.provider].defaultModel;
+        }
+        
+        set({ settings: updatedSettings });
+      },
       
       addMessage: (message) => set((state) => ({ messages: [...state.messages, message] })),
 
@@ -67,6 +78,7 @@ export const useChatStore = create<ChatState>()(
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               messages: historyForBackend,
+              provider: settings?.provider,
               model: settings?.model,
               temperature: settings?.temperature,
               mcpServers: settings?.mcpServers?.map(s => s.url) || []
@@ -108,6 +120,20 @@ export const useChatStore = create<ChatState>()(
     {
       name: 'gemini-insight-link-storage',
       storage: createJSONStorage(() => localStorage),
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          // On hydration, ensure the settings are valid, otherwise reset.
+          const provider = state.settings.provider;
+          if (!provider || !MODEL_CONFIG[provider]) {
+            state.settings = defaultSettings;
+            return;
+          }
+          const model = state.settings.model;
+          if (!MODEL_CONFIG[provider].models.includes(model)) {
+            state.settings.model = MODEL_CONFIG[provider].defaultModel;
+          }
+        }
+      }
     }
   )
 );
