@@ -191,7 +191,13 @@ def get_system_prompt(has_tools: bool, mcp_urls: List[str], last_turn_index: int
     base = f"""You are a helpful and intelligent AI assistant. 
 The conversation history is provided with [Turn Index] and [Timestamp] for each message. 
 The current message is [Turn {last_turn_index}].
-Always prioritize the latest information and the current configuration state over historical turns."""
+Always prioritize the latest information and the current configuration state over historical turns.
+IMPORTANT: Only call a tool when the user EXPLICITLY asks you to perform an action or fetch data.
+If the user asks whether you can see tools or what tools are available, 
+just LIST them by name and description. Do NOT invoke any tool unless clearly instructed.
+NEVER describe what you are doing in text before calling a tool.
+Just call the tool directly. Do not output any text like 'Đang lấy...', 
+'Processing...', 'Calling...' before a tool invocation."""
     
     if has_tools:
         tools_list = ", ".join(mcp_urls) if mcp_urls else "active sessions"
