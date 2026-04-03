@@ -1,6 +1,7 @@
 import asyncio
 import os
 import json
+import re
 from contextlib import AsyncExitStack
 from typing import Optional, List, Dict, Any
 
@@ -191,19 +192,35 @@ def get_system_prompt(has_tools: bool, mcp_urls: List[str], last_turn_index: int
     base = f"""You are a helpful and intelligent AI assistant. 
 The conversation history is provided with [Turn Index] and [Timestamp] for each message. 
 The current message is [Turn {last_turn_index}].
-Always prioritize the latest information and the current configuration state over historical turns.
+
 IMPORTANT: Only call a tool when the user EXPLICITLY asks you to perform an action or fetch data.
 If the user asks whether you can see tools or what tools are available, 
 just LIST them by name and description. Do NOT invoke any tool unless clearly instructed.
 NEVER describe what you are doing in text before calling a tool.
 Just call the tool directly. Do not output any text like 'Đang lấy...', 
-'Processing...', 'Calling...' before a tool invocation."""
-    
+'Processing...', 'Calling...' before a tool invocation.
+
+LANGUAGE: Always respond in the same language the user is using. If the user writes in Vietnamese, respond in Vietnamese. If in English, respond in English. Match their language automatically for every message.
+
+AFTER TOOL EXECUTION — MANDATORY REPORTING RULES:
+After every tool call, you MUST report the outcome in full detail. Follow this structure:
+1. Tool name: State which tool was called and with what parameters.
+2. Status: Clearly state SUCCESS or FAILURE.
+3. Result: Show the ACTUAL output, data, or response returned by the tool — not a summary phrase like "completed successfully". If the tool returned structured data, present it clearly. If it returned an error, quote the exact error message.
+4. Impact: Briefly explain what this result means for the user's request.
+
+NEVER replace detailed results with vague phrases such as:
+- "The operation was successful"
+- "Done"
+- "Task completed"
+- "The tool ran successfully"
+These phrases are FORBIDDEN as standalone responses after a tool call."""
+
     if has_tools:
         tools_list = ", ".join(mcp_urls) if mcp_urls else "active sessions"
         return f"{base}\n\nCURRENT STATUS (Turn {last_turn_index}): MCP Tools are ENABLED. You have access to: {tools_list}. Use them if the user request requires real-time or external data."
     else:
-        return f"{base}\n\nCURRENT STATUS (Turn {last_turn_index}): MCP Tools are DISABLED. No external tools or files are available in this turn. You MUST answer based ONLY on your internal knowledge. Do NOT attempt to use tools or mention that you might have them in the future unless the user adds them."""
+        return f"{base}\n\nCURRENT STATUS (Turn {last_turn_index}): MCP Tools are DISABLED. No external tools or files are available in this turn. You MUST answer based ONLY on your internal knowledge. Do NOT attempt to use tools or mention that you might have them in the future unless the user adds them."
 
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
@@ -268,6 +285,9 @@ async def chat_endpoint(request: ChatRequest):
                     res_text = json.dumps(res_text, cls=CustomEncoder)
             except:
                 res_text = str(res_text)
+
+        if isinstance(res_text, str):
+            res_text = re.sub(r'<think>.*?</think>', '', res_text, flags=re.DOTALL).strip()
 
         return {"response": res_text}
 
