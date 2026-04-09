@@ -24,3 +24,10 @@ export interface ChatSettings {
   maxTokens: number;
   mcpServers: McpServer[];
 }
+
+export interface ChatHistoryItem {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  timestamp: string;
+}

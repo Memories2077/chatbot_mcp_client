@@ -1,6 +1,6 @@
-import type {Config} from 'tailwindcss';
+import type { Config } from 'tailwindcss';
 
-export default {
+const config: Config = {
   darkMode: ['class'],
   content: [
     './src/pages/**/*.{js,ts,jsx,tsx,mdx}',
@@ -11,89 +11,110 @@ export default {
     extend: {
       fontFamily: {
         body: ['Inter', 'sans-serif'],
-        headline: ['Inter', 'sans-serif'],
-        code: ['monospace'],
+        headline: ['Manrope', 'sans-serif'],
+        label: ['Inter', 'sans-serif'],
+        display: ['Manrope', 'sans-serif'],
       },
       colors: {
-        background: 'hsl(var(--background))',
-        foreground: 'hsl(var(--foreground))',
-        card: {
-          DEFAULT: 'hsl(var(--card))',
-          foreground: 'hsl(var(--card-foreground))',
-        },
-        popover: {
-          DEFAULT: 'hsl(var(--popover))',
-          foreground: 'hsl(var(--popover-foreground))',
-        },
+        background: '#060f15',
+        'on-background': '#d3e9f6',
+        surface: '#060f15',
+        'on-surface': '#d3e9f6',
+        'surface-variant': '#132832',
+        'on-surface-variant': '#99aebb',
+        'surface-container-lowest': '#000000',
+        'surface-container-low': '#08151b',
+        'surface-container': '#0c1b23',
+        'surface-container-high': '#10222a',
+        'surface-container-highest': '#132832',
+        'surface-bright': '#172f3a',
+        'surface-dim': '#060f15',
         primary: {
-          DEFAULT: 'hsl(var(--primary))',
-          foreground: 'hsl(var(--primary-foreground))',
+          DEFAULT: '#faf9fd',
+          foreground: '#060f15',
+          container: '#eceaee',
+          'on-container': '#060f15',
+          dim: '#eceaee',
+          fixed: '#e3e2e6',
+          'on-fixed': '#3e3f42',
+          'fixed-dim': '#d5d4d8',
+          'on-fixed-variant': '#5b5b5f',
         },
+        'on-primary': '#060f15',
+        'on-primary-container': '#060f15',
         secondary: {
-          DEFAULT: 'hsl(var(--secondary))',
-          foreground: 'hsl(var(--secondary-foreground))',
+          DEFAULT: '#bdc8d3',
+          foreground: '#060f15',
+          container: '#1d272f',
+          'on-container': '#9aa5b0',
+          dim: '#afbac5',
+          fixed: '#e1ecf8',
+          'on-fixed': '#3b464f',
+          'fixed-dim': '#d3dee9',
+          'on-fixed-variant': '#57626c',
+        },
+        'on-secondary': '#060f15',
+        'on-secondary-container': '#060f15',
+        tertiary: {
+          DEFAULT: '#f5ffc3',
+          foreground: '#060f15',
+          container: '#e0f583',
+          'on-container': '#4f5d00',
+          dim: '#d8ec7c',
+          fixed: '#e6fb88',
+          'on-fixed': '#414d00',
+          'fixed-dim': '#d8ec7c',
+          'on-fixed-variant': '#5b6b00',
+        },
+        'on-tertiary': '#060f15',
+        'on-tertiary-container': '#060f15',
+        error: {
+          DEFAULT: '#fd6f85',
+          foreground: '#490013',
+          container: '#8a1632',
+          'on-container': '#ff97a3',
+          dim: '#c8475d',
+        },
+        'on-error': '#ffffff',
+        'on-error-container': '#ff97a3',
+        destructive: {
+          DEFAULT: '#fd6f85',
+          foreground: '#ffffff',
         },
         muted: {
-          DEFAULT: 'hsl(var(--muted))',
-          foreground: 'hsl(var(--muted-foreground))',
+          DEFAULT: '#132832',
+          foreground: '#99aebb',
         },
         accent: {
-          DEFAULT: 'hsl(var(--accent))',
-          foreground: 'hsl(var(--accent-foreground))',
+          DEFAULT: '#132832',
+          foreground: '#faf9fd',
         },
-        destructive: {
-          DEFAULT: 'hsl(var(--destructive))',
-          foreground: 'hsl(var(--destructive-foreground))',
+        popover: {
+          DEFAULT: '#0c1b23',
+          foreground: '#d3e9f6',
         },
-        border: 'hsl(var(--border))',
-        input: 'hsl(var(--input))',
-        ring: 'hsl(var(--ring))',
-        chart: {
-          '1': 'hsl(var(--chart-1))',
-          '2': 'hsl(var(--chart-2))',
-          '3': 'hsl(var(--chart-3))',
-          '4': 'hsl(var(--chart-4))',
-          '5': 'hsl(var(--chart-5))',
+        card: {
+          DEFAULT: '#0c1b23',
+          foreground: '#d3e9f6',
         },
-        sidebar: {
-          DEFAULT: 'hsl(var(--sidebar-background))',
-          foreground: 'hsl(var(--sidebar-foreground))',
-          primary: 'hsl(var(--sidebar-primary))',
-          'primary-foreground': 'hsl(var(--sidebar-primary-foreground))',
-          accent: 'hsl(var(--sidebar-accent))',
-          'accent-foreground': 'hsl(var(--sidebar-accent-foreground))',
-          border: 'hsl(var(--sidebar-border))',
-          ring: 'hsl(var(--sidebar-ring))',
-        },
+        border: '#364b55',
+        input: '#364b55',
+        ring: '#faf9fd',
+        outline: '#647884',
+        'outline-variant': '#364b55',
+        'inverse-surface': '#f4faff',
+        'inverse-on-surface': '#4c575d',
+        'inverse-primary': '#5e5f62',
       },
       borderRadius: {
-        lg: 'var(--radius)',
-        md: 'calc(var(--radius) - 2px)',
-        sm: 'calc(var(--radius) - 4px)',
-      },
-      keyframes: {
-        'accordion-down': {
-          from: {
-            height: '0',
-          },
-          to: {
-            height: 'var(--radix-accordion-content-height)',
-          },
-        },
-        'accordion-up': {
-          from: {
-            height: 'var(--radix-accordion-content-height)',
-          },
-          to: {
-            height: '0',
-          },
-        },
-      },
-      animation: {
-        'accordion-down': 'accordion-down 0.2s ease-out',
-        'accordion-up': 'accordion-up 0.2s ease-out',
+        DEFAULT: '1rem',
+        lg: '2rem',
+        xl: '3rem',
+        full: '9999px',
       },
     },
   },
   plugins: [require('tailwindcss-animate')],
-} satisfies Config;
+};
+
+export default config;
