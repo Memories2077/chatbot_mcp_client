@@ -126,6 +126,16 @@ async def get_or_create_agent(provider: str, model_name: str, mcp_urls: List[str
                 temperature=temperature,
                 api_key=api_key
             )
+        elif provider == "metaclaw":
+            api_key = os.getenv("METACLAW_API_KEY", "metaclaw")
+            base_url = os.getenv("METACLAW_BASE_URL", "http://localhost:30000/v1")
+            from langchain_openai import ChatOpenAI
+            llm = ChatOpenAI(
+                model=model_name,
+                temperature=temperature,
+                api_key=api_key,
+                base_url=base_url
+            )
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported provider: {provider}")
 

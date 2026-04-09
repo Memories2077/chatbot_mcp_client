@@ -37,4 +37,29 @@ Successfully migrated the application from monolithic HTML prototypes to a modul
   - `welcome_page.html`
 
 ---
-*End of log for 2026-04-09.*
+
+## [2026-04-09] MetaClaw Integration (Phase 1)
+
+### Overview
+Successfully integrated the **MetaClaw Learning Proxy** (Phase 1) to enable persistent memory and skill injection. This architecture places MetaClaw as a transparent proxy between the frontend and the LLM providers.
+
+### Changes Logged
+
+#### 1. Backend LLM Adapter
+- **Provider Support**: Added `metaclaw` provider to the backend's `get_or_create_agent` factory.
+- **Protocol**: Switched to `ChatOpenAI` adapter for MetaClaw communication to maintain OpenAI compatibility.
+- **Dependencies**: Added `langchain-openai` to `backend/requirements.txt`.
+- **Environment**: Updated `.env.example` with `METACLAW_API_KEY` and `METACLAW_BASE_URL`.
+
+#### 2. Frontend Configuration
+- **Model Config**: Updated `src/lib/config.ts` to include MetaClaw as a valid provider with an expanded model list (Gemini, Llama, Claude).
+- **Settings UI**: Updated `src/components/chat/chat-settings.tsx` to include provider selection and custom API key reminders for the proxy.
+- **Type Safety**: Updated `src/lib/types.ts` to include `'metaclaw'` in the `ChatSettings` provider union type.
+
+#### 3. Documentation & Organization
+- **Architecture**: Created `docs/METACLAW_PROPOSAL.md` (Design) and `docs/METACLAW_INTEGRATION.md` (Roadmap).
+- **Relocation**: Moved all standalone `.md` files (DOCKER, METACLAW, history, etc.) into the `docs/` folder for better repository structure.
+- **Verification**: Created `scratch/test_metaclaw.py` for automated proxy connection testing.
+
+---
+*End of log for MetaClaw Phase 1.*

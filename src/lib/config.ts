@@ -44,4 +44,14 @@ export const MODEL_CONFIG = {
       'groq/compound-mini',
     ],
   },
+  metaclaw: {
+    defaultModel: 'gemini-2.5-flash',
+    models: [
+      'gemini-2.5-flash',
+      'gemini-2.5-pro',
+      'llama-3.3-70b-versatile',
+      'qwen/qwen3-32b',
+      'claude-3-5-sonnet-20241022'
+    ],
+  },
 };
