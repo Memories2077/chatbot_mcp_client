@@ -15,6 +15,7 @@ export interface ChatMessage {
 
 export interface McpServer {
   url: string;
+  name?: string;
 }
 
 export interface ChatSettings {
