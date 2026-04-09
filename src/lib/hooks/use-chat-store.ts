@@ -10,6 +10,8 @@ interface ChatState {
   messages: ChatMessage[];
   settings: ChatSettings;
   isLoading: boolean;
+  isRightPanelOpen: boolean;
+  toggleRightPanel: () => void;
   sendMessage: (text: string, settings?: ChatSettings) => void;
   setSettings: (settings: Partial<ChatSettings>) => void;
   addMessage: (message: ChatMessage) => void;
@@ -30,6 +32,9 @@ export const useChatStore = create<ChatState>()(
       messages: [],
       settings: defaultSettings,
       isLoading: false,
+      isRightPanelOpen: true,
+
+      toggleRightPanel: () => set((state) => ({ isRightPanelOpen: !state.isRightPanelOpen })),
 
       setSettings: (newSettings) => {
         const currentSettings = get().settings;
