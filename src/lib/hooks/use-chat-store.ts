@@ -80,6 +80,17 @@ export const useChatStore = create<ChatState>()(
             // Move to top
             const item = updatedHistory.splice(index, 1)[0];
             updatedHistory.unshift(item);
+          } else {
+            // currentChatId stale - create new entry
+            const newId = uuidv4();
+            const newItem: ChatHistoryItem = {
+              id: newId,
+              title,
+              messages: [...messages],
+              timestamp: new Date().toISOString()
+            };
+            updatedHistory = [newItem, ...updatedHistory];
+            set({ currentChatId: newId });
           }
         } else {
           const newId = uuidv4();

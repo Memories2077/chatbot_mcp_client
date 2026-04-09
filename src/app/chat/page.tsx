@@ -21,7 +21,6 @@ export default function ChatPage() {
   // Auto-save when leaving the page
   useEffect(() => {
     return () => {
-      console.log("Leaving Chat page, persisting session...");
       persistCurrentChat();
     };
   }, [persistCurrentChat]);

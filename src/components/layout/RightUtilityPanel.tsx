@@ -185,7 +185,7 @@ export function RightUtilityPanel() {
               onChange={(e) => setMcpInput(e.target.value)}
               className="bg-surface-container-lowest/50 border-outline-variant/10 rounded-xl flex-1"
               disabled={isVerifyingMcp}
-              onKeyDown={(e) => e.key === "Enter" && handleAddMcp()}
+              onKeyDown={(e) => e.key === "Enter" && !isVerifyingMcp && handleAddMcp()}
             />
             <Button 
               onClick={handleAddMcp}
