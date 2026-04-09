@@ -222,6 +222,46 @@ These phrases are FORBIDDEN as standalone responses after a tool call."""
     else:
         return f"{base}\n\nCURRENT STATUS (Turn {last_turn_index}): MCP Tools are DISABLED. No external tools or files are available in this turn. You MUST answer based ONLY on your internal knowledge. Do NOT attempt to use tools or mention that you might have them in the future unless the user adds them."
 
+class McpMetadataRequest(BaseModel):
+    url: str
+
+@app.post("/mcp/metadata")
+async def get_mcp_metadata(request: McpMetadataRequest):
+    """Connect to an MCP server and fetch its metadata (name, etc.)"""
+    url = request.url
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+    
+    try:
+        async with AsyncExitStack() as exit_stack:
+            streams = await asyncio.wait_for(
+                exit_stack.enter_async_context(streamable_http_client(url)), 
+                timeout=10.0
+            )
+            read, write, _ = streams
+            session = await exit_stack.enter_async_context(ClientSession(read, write))
+            
+            # The initialize() call returns the server's metadata
+            init_result = await asyncio.wait_for(session.initialize(), timeout=10.0)
+            
+            # Extract server name from the initialization result
+            server_name = init_result.serverInfo.name if hasattr(init_result, 'serverInfo') else "Unknown Server"
+            
+            return {
+                "name": server_name,
+                "url": url,
+                "status": "connected"
+            }
+    except Exception as e:
+        print(f"Failed to fetch metadata for {url}: {e}")
+        # Return a fallback name if connection fails but URL is valid format
+        return {
+            "name": url.split('/')[-1] or "External Server",
+            "url": url,
+            "status": "error",
+            "detail": str(e)
+        }
+
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
     try:

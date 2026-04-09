@@ -9,6 +9,7 @@ import { BACKEND_API, MODEL_CONFIG } from '@/lib/config';
 interface ChatState {
   messages: ChatMessage[];
   history: ChatHistoryItem[];
+  currentChatId: string | null;
   settings: ChatSettings;
   isLoading: boolean;
   isRightPanelOpen: boolean;
@@ -20,9 +21,10 @@ interface ChatState {
   clearMessages: () => void;
   loadHistory: (id: string) => void;
   deleteHistory: (id: string) => void;
+  persistCurrentChat: () => void; // New: Auto-save without clearing
 }
 
-const SESSION_TIMEOUT = 1000 * 60 * 60; // 1 hour
+const SESSION_TIMEOUT = 1000 * 60 * 60;
 
 const defaultSettings: ChatSettings = {
   provider: 'gemini',
@@ -37,6 +39,7 @@ export const useChatStore = create<ChatState>()(
     (set, get) => ({
       messages: [],
       history: [],
+      currentChatId: null,
       settings: defaultSettings,
       isLoading: false,
       isRightPanelOpen: true,
@@ -58,41 +61,74 @@ export const useChatStore = create<ChatState>()(
         lastActive: Date.now()
       })),
 
-      clearMessages: () => {
-        const { messages, history } = get();
-        if (messages.length > 0) {
-          // Create a title from the first message
-          const firstMsg = messages.find(m => m.role === 'user')?.content || "Untitled Chat";
-          const title = firstMsg.length > 30 ? firstMsg.substring(0, 30) + "..." : firstMsg;
-          
+      persistCurrentChat: () => {
+        const { messages, history, currentChatId } = get();
+        if (messages.length === 0) return;
+
+        let updatedHistory = [...history];
+        const firstMsg = messages.find(m => m.role === 'user')?.content || "Untitled Chat";
+        const title = firstMsg.length > 30 ? firstMsg.substring(0, 30) + "..." : firstMsg;
+
+        if (currentChatId) {
+          const index = updatedHistory.findIndex(h => h.id === currentChatId);
+          if (index !== -1) {
+            updatedHistory[index] = {
+              ...updatedHistory[index],
+              messages: [...messages],
+              timestamp: new Date().toISOString()
+            };
+            // Move to top
+            const item = updatedHistory.splice(index, 1)[0];
+            updatedHistory.unshift(item);
+          } else {
+            // currentChatId stale - create new entry
+            const newId = uuidv4();
+            const newItem: ChatHistoryItem = {
+              id: newId,
+              title,
+              messages: [...messages],
+              timestamp: new Date().toISOString()
+            };
+            updatedHistory = [newItem, ...updatedHistory];
+            set({ currentChatId: newId });
+          }
+        } else {
+          const newId = uuidv4();
           const newItem: ChatHistoryItem = {
-            id: uuidv4(),
+            id: newId,
             title,
             messages: [...messages],
             timestamp: new Date().toISOString()
           };
-          set({ history: [newItem, ...history], messages: [], lastActive: Date.now() });
-        } else {
-          set({ messages: [], lastActive: Date.now() });
+          updatedHistory = [newItem, ...updatedHistory];
+          set({ currentChatId: newId });
         }
+        set({ history: updatedHistory });
+      },
+
+      clearMessages: () => {
+        const { persistCurrentChat } = get();
+        persistCurrentChat(); // Save before clearing
+        set({ messages: [], currentChatId: null, lastActive: Date.now() });
       },
 
       loadHistory: (id: string) => {
         const { history } = get();
         const item = history.find(h => h.id === id);
         if (item) {
-          set({ messages: [...item.messages], lastActive: Date.now() });
+          set({ messages: [...item.messages], currentChatId: id, lastActive: Date.now() });
         }
       },
 
       deleteHistory: (id: string) => {
         set((state) => ({
-          history: state.history.filter(h => h.id !== id)
+          history: state.history.filter(h => h.id !== id),
+          currentChatId: state.currentChatId === id ? null : state.currentChatId
         }));
       },
 
       sendMessage: async (text, overrideSettings) => {
-        const { messages, settings: currentSettings } = get();
+        const { messages, settings: currentSettings, persistCurrentChat } = get();
         const settings = overrideSettings || currentSettings;
         set({ isLoading: true, lastActive: Date.now() });
 
@@ -137,10 +173,14 @@ export const useChatStore = create<ChatState>()(
             content: data.response,
             timestamp: new Date().toISOString(),
           };
+          
           set((state) => ({ 
             messages: [...state.messages, modelMessage],
             lastActive: Date.now()
           }));
+          
+          // Auto-save to history after response
+          persistCurrentChat();
           
         } catch (error: any) {
           console.error("Error calling AI flow:", error);
@@ -161,6 +201,7 @@ export const useChatStore = create<ChatState>()(
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({ 
         history: state.history,
+        currentChatId: state.currentChatId,
         settings: state.settings,
         isRightPanelOpen: state.isRightPanelOpen,
         lastActive: state.lastActive
@@ -169,7 +210,6 @@ export const useChatStore = create<ChatState>()(
         if (state) {
           const now = Date.now();
           if (state.messages && state.messages.length > 0 && (now - state.lastActive > SESSION_TIMEOUT)) {
-            // Auto-archive old session before clearing
             const firstMsg = state.messages.find(m => m.role === 'user')?.content || "Auto-archived Chat";
             const title = firstMsg.length > 30 ? firstMsg.substring(0, 30) + "..." : firstMsg;
             const newItem: ChatHistoryItem = {
@@ -180,6 +220,7 @@ export const useChatStore = create<ChatState>()(
             };
             state.history = [newItem, ...state.history];
             state.messages = [];
+            state.currentChatId = null;
             state.lastActive = now;
           }
         }

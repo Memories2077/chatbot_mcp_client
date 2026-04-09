@@ -15,19 +15,25 @@ const navItems = [
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { open, isMobile, toggleSidebar } = useSidebar();
+  const { open, isMobile, toggleSidebar, setOpen } = useSidebar();
   const { clearMessages, history, loadHistory } = useChatStore();
 
   if (isMobile) return null;
 
   const handleNewChat = () => {
     clearMessages();
+    setOpen(false); // Auto close sidebar
     router.push("/chat");
   };
 
   const handleLoadChat = (id: string) => {
     loadHistory(id);
+    setOpen(false); // Auto close sidebar
     router.push("/chat");
+  };
+
+  const handleNavLinkClick = () => {
+    setOpen(false); // Auto close sidebar on nav
   };
 
   return (
@@ -38,7 +44,7 @@ export function Sidebar() {
       )}
     >
       <div className="mb-10 flex items-center justify-between px-2 w-full">
-        <Link href="/" className="flex items-center gap-3">
+        <Link href="/" className="flex items-center gap-3" onClick={handleNavLinkClick}>
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-primary-container flex items-center justify-center text-on-primary">
             <span className="material-symbols-outlined">auto_awesome</span>
           </div>
@@ -71,6 +77,7 @@ export function Sidebar() {
             <Link
               key={item.label}
               href={item.href}
+              onClick={handleNavLinkClick}
               className={cn(
                 "flex items-center gap-4 p-4 rounded-2xl transition-all duration-300 font-headline tracking-tight",
                 isActive
