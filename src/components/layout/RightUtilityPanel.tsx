@@ -29,55 +29,47 @@ export function RightUtilityPanel() {
     const trimmedUrl = mcpInput.trim();
     if (!trimmedUrl) return;
     
-    console.log("Adding MCP server:", trimmedUrl);
     setIsVerifyingMcp(true);
     
     try {
-      const metadataUrl = BACKEND_API.mcpMetadata();
-      console.log("Calling backend metadata endpoint:", metadataUrl);
-      
-      const response = await fetch(metadataUrl, {
+      const response = await fetch(BACKEND_API.mcpMetadata(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: trimmedUrl })
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: "Unknown error" }));
-        throw new Error(errorData.detail || `Server returned ${response.status}`);
-      }
-
       const data = await response.json();
-      console.log("Received metadata:", data);
+
+      if (!response.ok || data.status === "error") {
+        throw new Error(data.detail || "Connection refused by host or invalid MCP URL.");
+      }
       
       const newMcp = { 
-        name: data.name || `Server ${settings.mcpServers.length + 1}`, 
+        name: data.name, 
         url: trimmedUrl 
       };
 
       if (settings.mcpServers.some(s => s.url === newMcp.url)) {
-        toast({ title: "Server already exists", variant: "destructive" });
+        toast({ 
+          title: "Duplicate Server", 
+          description: "This MCP server is already in your active list.",
+          variant: "destructive" 
+        });
       } else {
         setSettings({ mcpServers: [...settings.mcpServers, newMcp] });
         setMcpInput("");
-        toast({ title: `Connected to ${newMcp.name}` });
+        toast({ 
+          title: "Neural Link Established", 
+          description: `Successfully connected to ${data.name}.` 
+        });
       }
     } catch (error: any) {
       console.error("MCP Verification Error:", error);
       toast({ 
-        title: "Verification Failed", 
-        description: error.message || "Could not verify MCP server. Adding anyway.",
+        title: "Connection Failed", 
+        description: "Ethereal could not reach the specified neural node.",
         variant: "destructive"
       });
-      
-      // Fallback: Add anyway if it's not a duplicate
-      if (!settings.mcpServers.some(s => s.url === trimmedUrl)) {
-        const fallbackName = trimmedUrl.split('/').filter(Boolean).pop() || "External Server";
-        setSettings({ 
-          mcpServers: [...settings.mcpServers, { name: fallbackName, url: trimmedUrl }] 
-        });
-        setMcpInput("");
-      }
     } finally {
       setIsVerifyingMcp(false);
     }
@@ -185,7 +177,7 @@ export function RightUtilityPanel() {
               onChange={(e) => setMcpInput(e.target.value)}
               className="bg-surface-container-lowest/50 border-outline-variant/10 rounded-xl flex-1"
               disabled={isVerifyingMcp}
-              onKeyDown={(e) => e.key === "Enter" && !isVerifyingMcp && handleAddMcp()}
+              onKeyDown={(e) => e.key === "Enter" && handleAddMcp()}
             />
             <Button 
               onClick={handleAddMcp}

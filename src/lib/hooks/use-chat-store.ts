@@ -15,16 +15,17 @@ interface ChatState {
   isRightPanelOpen: boolean;
   lastActive: number;
   toggleRightPanel: () => void;
+  setRightPanelOpen: (open: boolean) => void;
   sendMessage: (text: string, settings?: ChatSettings) => void;
   setSettings: (settings: Partial<ChatSettings>) => void;
   addMessage: (message: ChatMessage) => void;
   clearMessages: () => void;
   loadHistory: (id: string) => void;
   deleteHistory: (id: string) => void;
-  persistCurrentChat: () => void; // New: Auto-save without clearing
+  persistCurrentChat: () => void;
 }
 
-const SESSION_TIMEOUT = 1000 * 60 * 60;
+const SESSION_TIMEOUT = 1000 * 60 * 60; // 1 hour
 
 const defaultSettings: ChatSettings = {
   provider: 'gemini',
@@ -42,10 +43,11 @@ export const useChatStore = create<ChatState>()(
       currentChatId: null,
       settings: defaultSettings,
       isLoading: false,
-      isRightPanelOpen: true,
+      isRightPanelOpen: false, // Default to closed for better UX
       lastActive: Date.now(),
 
       toggleRightPanel: () => set((state) => ({ isRightPanelOpen: !state.isRightPanelOpen })),
+      setRightPanelOpen: (open: boolean) => set({ isRightPanelOpen: open }),
 
       setSettings: (newSettings) => {
         const currentSettings = get().settings;
@@ -77,11 +79,9 @@ export const useChatStore = create<ChatState>()(
               messages: [...messages],
               timestamp: new Date().toISOString()
             };
-            // Move to top
             const item = updatedHistory.splice(index, 1)[0];
             updatedHistory.unshift(item);
           } else {
-            // currentChatId stale - create new entry
             const newId = uuidv4();
             const newItem: ChatHistoryItem = {
               id: newId,
@@ -108,15 +108,17 @@ export const useChatStore = create<ChatState>()(
 
       clearMessages: () => {
         const { persistCurrentChat } = get();
-        persistCurrentChat(); // Save before clearing
-        set({ messages: [], currentChatId: null, lastActive: Date.now() });
+        persistCurrentChat();
+        // Auto-close right panel when clearing/starting new chat
+        set({ messages: [], currentChatId: null, isRightPanelOpen: false, lastActive: Date.now() });
       },
 
       loadHistory: (id: string) => {
         const { history } = get();
         const item = history.find(h => h.id === id);
         if (item) {
-          set({ messages: [...item.messages], currentChatId: id, lastActive: Date.now() });
+          // Auto-close right panel when loading a historical chat to focus on content
+          set({ messages: [...item.messages], currentChatId: id, isRightPanelOpen: false, lastActive: Date.now() });
         }
       },
 
@@ -179,7 +181,6 @@ export const useChatStore = create<ChatState>()(
             lastActive: Date.now()
           }));
           
-          // Auto-save to history after response
           persistCurrentChat();
           
         } catch (error: any) {
@@ -203,7 +204,7 @@ export const useChatStore = create<ChatState>()(
         history: state.history,
         currentChatId: state.currentChatId,
         settings: state.settings,
-        isRightPanelOpen: state.isRightPanelOpen,
+        // isRightPanelOpen is EXCLUDED from persistence for robust UX
         lastActive: state.lastActive
       }),
       onRehydrateStorage: () => (state) => {
@@ -221,6 +222,7 @@ export const useChatStore = create<ChatState>()(
             state.history = [newItem, ...state.history];
             state.messages = [];
             state.currentChatId = null;
+            state.isRightPanelOpen = false;
             state.lastActive = now;
           }
         }
