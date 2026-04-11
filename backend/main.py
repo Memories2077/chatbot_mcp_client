@@ -1,12 +1,15 @@
 import asyncio
 import os
 import json
+import re
 from contextlib import AsyncExitStack
 from typing import Optional, List, Dict, Any
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+
 
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
@@ -29,28 +32,6 @@ try:
 except (ValueError, TypeError):
     backend_port = 8000
 
-app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint for Docker/K8s"""
-    try:
-        gemini_key = os.getenv("GEMINI_API_KEY")
-        groq_key = os.getenv("GROQ_API_KEY")
-        if not gemini_key and not groq_key:
-            return {"status": "unhealthy", "detail": "No API keys (GEMINI_API_KEY or GROQ_API_KEY) are set."}
-        return {"status": "healthy", "service": "backend"}
-    except Exception as e:
-        return {"status": "unhealthy", "detail": str(e)}
-
 class CustomEncoder(json.JSONEncoder):
     def default(self, o):
         if hasattr(o, "content"):
@@ -72,13 +53,50 @@ class ChatRequest(BaseModel):
 class AgentState:
     def __init__(self):
         self.agent = None
-        self.exit_stack = None
+        self.exit_stacks = []
         self.current_provider = None
         self.current_model = None
         self.current_mcp_urls = []
+        self.current_temperature = None
         self.lock = asyncio.Lock() # Add lock to prevent race conditions
 
 state = AgentState()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+
+    # Shutdown
+    print("\n--- SHUTTING DOWN: Closing all MCP sessions... ---")
+    for exit_stack in state.exit_stacks:
+        try:
+            await exit_stack.aclose()
+        except Exception as e:
+            pass # suppress error
+    state.exit_stacks = []
+    print("All MCP sessions closed cleanly.")
+
+app = FastAPI(lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Docker/K8s"""
+    try:
+        gemini_key = os.getenv("GEMINI_API_KEY")
+        groq_key = os.getenv("GROQ_API_KEY")
+        if not gemini_key and not groq_key:
+            return {"status": "unhealthy", "detail": "No API keys (GEMINI_API_KEY or GROQ_API_KEY) are set."}
+        return {"status": "healthy", "service": "backend"}
+    except Exception as e:
+        return {"status": "unhealthy", "detail": str(e)}
 
 async def get_or_create_agent(provider: str, model_name: str, mcp_urls: List[str], temperature: float):
     # Ensure mcp_urls is a clean list of strings
@@ -89,22 +107,21 @@ async def get_or_create_agent(provider: str, model_name: str, mcp_urls: List[str
         if (state.agent and
             state.current_provider == provider and
             state.current_model == model_name and 
-            sorted(state.current_mcp_urls) == sorted(mcp_urls)):
+            sorted(state.current_mcp_urls) == sorted(mcp_urls) and
+            state.current_temperature == temperature):
             return state.agent
 
         print(f"\n--- CONFIG CHANGE DETECTED ---")
-        print(f"Re-initializing agent for provider '{provider}' with model '{model_name}'...")
+        print(f"Re-initializing agent for provider '{provider}' with model '{model_name}' (temperature = '{temperature}')...")
         
-        # Aggressive cleanup of the old stack
-        if state.exit_stack:
+        # Close the sessions progressively
+        for exit_stack in state.exit_stacks:
             try:
-                # We wrap this in a protected block to catch anyio's task-mismatch errors
-                await state.exit_stack.aclose()
+                await exit_stack.aclose()
             except Exception as e:
-                print(f"Note: Cleanup of old MCP sessions was messy (Task mismatch), but moving on: {e}")
-            finally:
-                state.exit_stack = None
-                state.agent = None
+                print(f"Note: Could not cleanly close a session: {e}")
+        state.exit_stacks = []
+        state.agent = None
         
         llm = None
         if provider == "gemini":
@@ -130,20 +147,21 @@ async def get_or_create_agent(provider: str, model_name: str, mcp_urls: List[str
             raise HTTPException(status_code=400, detail=f"Unsupported provider: {provider}")
 
     all_tools = []
-    state.exit_stack = AsyncExitStack()
     
     if mcp_urls:
         sessions = []
         for url in mcp_urls:
             try:
                 print(f"Attempting to connect to: {url}...")
+                exit_stack = AsyncExitStack()
                 streams = await asyncio.wait_for(
-                    state.exit_stack.enter_async_context(streamable_http_client(url)), 
+                    exit_stack.enter_async_context(streamable_http_client(url)), 
                     timeout=10.0
                 )
-                read, write, callback = streams
-                session = await state.exit_stack.enter_async_context(ClientSession(read, write))
+                read, write, _ = streams
+                session = await exit_stack.enter_async_context(ClientSession(read, write))
                 await asyncio.wait_for(session.initialize(), timeout=10.0)
+                state.exit_stacks.append(exit_stack)
                 sessions.append(session)
                 print(f"Successfully connected: {url}")
             except Exception as e:
@@ -167,19 +185,82 @@ async def get_or_create_agent(provider: str, model_name: str, mcp_urls: List[str
     state.current_provider = provider
     state.current_model = model_name
     state.current_mcp_urls = mcp_urls.copy()
+    state.current_temperature = temperature
     return state.agent
 
 def get_system_prompt(has_tools: bool, mcp_urls: List[str], last_turn_index: int):
     base = f"""You are a helpful and intelligent AI assistant. 
 The conversation history is provided with [Turn Index] and [Timestamp] for each message. 
 The current message is [Turn {last_turn_index}].
-Always prioritize the latest information and the current configuration state over historical turns."""
-    
+
+IMPORTANT: Only call a tool when the user EXPLICITLY asks you to perform an action or fetch data.
+If the user asks whether you can see tools or what tools are available, 
+just LIST them by name and description. Do NOT invoke any tool unless clearly instructed.
+NEVER describe what you are doing in text before calling a tool.
+Just call the tool directly. Do not output any text like 'Đang lấy...', 
+'Processing...', 'Calling...' before a tool invocation.
+
+LANGUAGE: Always respond in the same language the user is using. If the user writes in Vietnamese, respond in Vietnamese. If in English, respond in English. Match their language automatically for every message.
+
+AFTER TOOL EXECUTION — MANDATORY REPORTING RULES:
+After every tool call, you MUST report the outcome in full detail. Follow this structure:
+1. Tool name: State which tool was called and with what parameters.
+2. Status: Clearly state SUCCESS or FAILURE.
+3. Result: Show the ACTUAL output, data, or response returned by the tool — not a summary phrase like "completed successfully". If the tool returned structured data, present it clearly. If it returned an error, quote the exact error message.
+4. Impact: Briefly explain what this result means for the user's request.
+
+NEVER replace detailed results with vague phrases such as:
+- "The operation was successful"
+- "Done"
+- "Task completed"
+- "The tool ran successfully"
+These phrases are FORBIDDEN as standalone responses after a tool call."""
+
     if has_tools:
         tools_list = ", ".join(mcp_urls) if mcp_urls else "active sessions"
         return f"{base}\n\nCURRENT STATUS (Turn {last_turn_index}): MCP Tools are ENABLED. You have access to: {tools_list}. Use them if the user request requires real-time or external data."
     else:
-        return f"{base}\n\nCURRENT STATUS (Turn {last_turn_index}): MCP Tools are DISABLED. No external tools or files are available in this turn. You MUST answer based ONLY on your internal knowledge. Do NOT attempt to use tools or mention that you might have them in the future unless the user adds them."""
+        return f"{base}\n\nCURRENT STATUS (Turn {last_turn_index}): MCP Tools are DISABLED. No external tools or files are available in this turn. You MUST answer based ONLY on your internal knowledge. Do NOT attempt to use tools or mention that you might have them in the future unless the user adds them."
+
+class McpMetadataRequest(BaseModel):
+    url: str
+
+@app.post("/mcp/metadata")
+async def get_mcp_metadata(request: McpMetadataRequest):
+    """Connect to an MCP server and fetch its metadata (name, etc.)"""
+    url = request.url
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+    
+    try:
+        async with AsyncExitStack() as exit_stack:
+            streams = await asyncio.wait_for(
+                exit_stack.enter_async_context(streamable_http_client(url)), 
+                timeout=10.0
+            )
+            read, write, _ = streams
+            session = await exit_stack.enter_async_context(ClientSession(read, write))
+            
+            # The initialize() call returns the server's metadata
+            init_result = await asyncio.wait_for(session.initialize(), timeout=10.0)
+            
+            # Extract server name from the initialization result
+            server_name = init_result.serverInfo.name if hasattr(init_result, 'serverInfo') else "Unknown Server"
+            
+            return {
+                "name": server_name,
+                "url": url,
+                "status": "connected"
+            }
+    except Exception as e:
+        print(f"Failed to fetch metadata for {url}: {e}")
+        # Return a fallback name if connection fails but URL is valid format
+        return {
+            "name": url.split('/')[-1] or "External Server",
+            "url": url,
+            "status": "error",
+            "detail": str(e)
+        }
 
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
@@ -244,6 +325,9 @@ async def chat_endpoint(request: ChatRequest):
                     res_text = json.dumps(res_text, cls=CustomEncoder)
             except:
                 res_text = str(res_text)
+
+        if isinstance(res_text, str):
+            res_text = re.sub(r'<think>.*?</think>', '', res_text, flags=re.DOTALL).strip()
 
         return {"response": res_text}
 

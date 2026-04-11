@@ -15,6 +15,7 @@ export interface ChatMessage {
 
 export interface McpServer {
   url: string;
+  name?: string;
 }
 
 export interface ChatSettings {
@@ -23,4 +24,11 @@ export interface ChatSettings {
   temperature: number;
   maxTokens: number;
   mcpServers: McpServer[];
+}
+
+export interface ChatHistoryItem {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  timestamp: string;
 }

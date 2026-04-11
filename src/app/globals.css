@@ -2,88 +2,85 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  font-family: Arial, Helvetica, sans-serif;
-}
-
 @layer base {
   :root {
-    --background: 280 5% 12%;
-    --foreground: 0 0% 98%;
-    --card: 280 5% 15%;
-    --card-foreground: 0 0% 98%;
-    --popover: 280 5% 12%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 261 100% 62.5%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 220 100% 74.3%;
-    --accent-foreground: 280 5% 12%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 20%;
-    --input: 0 0% 20%;
-    --ring: 261 100% 62.5%;
-    --chart-1: 12 76% 61%;
-    --chart-2: 173 58% 39%;
-    --chart-3: 197 37% 24%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 27 87% 67%;
-    --radius: 0.5rem;
-    --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 240 5.9% 10%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 240 4.8% 95.9%;
-    --sidebar-accent-foreground: 240 5.9% 10%;
-    --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --background: #060f15;
+    --foreground: #d3e9f6;
+    --radius: 1rem;
   }
 
-  .dark {
-    --background: 280 5% 12%;
-    --foreground: 0 0% 98%;
-    --card: 280 5% 15%;
-    --card-foreground: 0 0% 98%;
-    --popover: 280 5% 12%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 261 100% 62.5%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 220 100% 74.3%;
-    --accent-foreground: 280 5% 12%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 20%;
-    --input: 0 0% 20%;
-    --ring: 261 100% 62.5%;
-    --chart-1: 220 70% 50%;
-    --chart-2: 160 60% 45%;
-    --chart-3: 30 80% 55%;
-    --chart-4: 280 65% 60%;
-    --chart-5: 340 75% 55%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+  body {
+    @apply bg-background text-on-surface font-body selection:bg-primary/30 antialiased;
   }
 }
 
-@layer base {
-  * {
-    @apply border-border;
-  }
-  body {
-    @apply bg-background text-foreground;
-  }
+/* Custom Scrollbar for a premium look */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-surface-variant/30 rounded-full hover:bg-surface-variant/50 transition-colors;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Glassmorphism effects */
+.glass-panel {
+  @apply bg-surface-container-low/60 backdrop-blur-2xl border border-outline-variant/10 shadow-2xl;
+}
+
+/* The Living Canvas Background Animation */
+.living-canvas-bg {
+  background: radial-gradient(circle at 50% 50%, #0c1b23 0%, #060f15 100%);
+}
+
+/* Toast Customization */
+[data-radix-toast-viewport] {
+  @apply fixed bottom-0 right-0 flex flex-col p-6 gap-2 w-full max-w-[420px] m-0 list-none z-[100] outline-none;
+}
+
+.ethereal-toast {
+  @apply bg-surface-container-highest/80 backdrop-blur-xl border border-primary/20 text-on-surface rounded-2xl p-4 shadow-[0_10px_40px_rgba(0,0,0,0.5)] flex items-start gap-4 transition-all duration-300;
+}
+
+.ethereal-toast[data-state='open'] {
+  @apply animate-in slide-in-from-right-full duration-500;
+}
+
+.ethereal-toast[data-state='closed'] {
+  @apply animate-out fade-out-0 scale-95 duration-300;
+}
+
+.ethereal-toast-success {
+  @apply border-primary/40 shadow-[0_0_20px_rgba(178,153,255,0.1)];
+}
+
+.ethereal-toast-error {
+  @apply border-error/40 shadow-[0_0_20px_rgba(253,111,133,0.1)];
+}
+
+/* Type Scales & Helpers (matching mockup) */
+.display-lg {
+  @apply text-[3.5rem] leading-[1] font-extrabold tracking-tight;
+}
+
+.headline-sm {
+  @apply text-2xl font-bold leading-8;
+}
+
+.body-lg {
+  @apply text-lg leading-relaxed font-medium opacity-90;
 }

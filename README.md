@@ -1,118 +1,75 @@
-# Gemini InsightLink 🤖
+# 🌌 Ethereal Intelligence
 
-A modern chatbot application built with **Next.js** (Frontend) and **FastAPI** (Backend), integrating Google Gemini AI with the ability to connect to Model Context Protocol (MCP) servers for dynamic tool execution.
+**Ethereal Intelligence** là một nền tảng Agentic Chatbot thế hệ mới, được thiết kế với giao diện hiện đại và khả năng mở rộng không giới hạn thông qua **Model Context Protocol (MCP)**. Ứng dụng kết hợp sức mạnh của **Gemini 2.5 Flash** và các mô hình ngôn ngữ tiên tiến nhất để tạo ra một trợ lý AI có khả năng thực thi công cụ (tools) linh hoạt trong thời gian thực.
 
-![Gemini InsightLink Preview](img/image.png)
+![Ethereal Intelligence Preview](img/demo.gif)
 
-## 🚀 Getting Started
+## ✨ Tính năng nổi bật
 
-This project can be run in two ways: locally for development or using Docker.
+- **Giao diện "Ethereal" Hiện Đại**: Ngôn ngữ thiết kế tinh tế với tông màu Deep Purple (#8340FF) và Dark Gray (#201C21), tối ưu cho trải nghiệm người dùng chuyên nghiệp.
+- **Agentic Tool Execution**: Tận dụng LangChain để tạo ra vòng lặp Agentic. Chatbot không chỉ trả lời mà còn biết tự suy nghĩ và sử dụng các MCP Servers để truy xuất dữ liệu bên ngoài.
+- **Tích hợp Gemini 2.5 Flash**: Hỗ trợ mô hình mới nhất từ Google với tốc độ xử lý cực nhanh và khả năng xử lý ngữ cảnh sâu.
+- **Dynamic MCP Integration**: Cho phép đăng ký các MCP Server (tool endpoints) trực tiếp từ giao diện thông qua URL, tự động nhận diện metadata và trạng thái kết nối.
+- **Quản lý Hội thoại Thông minh**: 
+    - Lưu trữ lịch sử (Persist) tự động vào `localStorage`.
+    - Cơ chế **Auto-Archive**: Tự động lưu trữ các phiên chat cũ sau 1 giờ không hoạt động để giữ không gian làm việc sạch sẽ.
+- **Multi-Provider Support**: Linh hoạt chuyển đổi giữa Google Gemini và Groq (Llama 3, Mixtral) để tối ưu chi phí và hiệu năng.
 
-### 1. Local Development
+## 🛠️ Công nghệ sử dụng
 
-**Prerequisites:**
-- Node.js (v20 or later)
-- Python (v3.9 or later)
-- A Google Gemini API Key
+### Frontend (The "Ethereal" UI)
+- **Framework**: Next.js 15 (App Router), TypeScript.
+- **State Management**: Zustand (với middleware Persist).
+- **Styling**: Tailwind CSS, Radix UI, Lucide Icons.
+- **Animations**: Framer Motion cho các hiệu ứng chuyển cảnh mượt mà.
 
-#### Step 1: Configure Environment
+### Backend (The "Intelligence" Engine)
+- **Framework**: FastAPI (Python 3.12+).
+- **AI Orchestration**: LangChain, LangGraph (dành cho Agentic workflows).
+- **MCP Client**: MCP SDK (kết nối với các tool server qua HTTP/SSE).
+- **Models**: Gemini 2.5 Flash, Groq API.
 
-1.  Create a `.env` file in the project root by copying the example:
-    ```bash
-    cp .env.example .env
-    ```
-2.  Edit the `.env` file and add your credentials:
-    ```env
-    # Your secret Gemini API Key
-    GEMINI_API_KEY="your_gemini_api_key_here"
+## 🚀 Hướng dẫn cài đặt
 
-    # The port for the backend server
-    NEXT_PUBLIC_BACKEND_PORT=8000
-    ```
+### 1. Cấu hình môi trường
 
-#### Step 2: Run the Backend
+Tạo file `.env` tại thư mục gốc từ mẫu `.env.example`:
+```env
+GEMINI_API_KEY="your_gemini_api_key_here"
+GROQ_API_KEY="your_groq_api_key_here" # Tùy chọn
+NEXT_PUBLIC_BACKEND_PORT=8000
+```
 
-1.  Navigate to the backend directory and create a virtual environment:
-    ```bash
-    cd backend
-    python -m venv venv
-    ```
-2.  Activate the virtual environment:
-    ```bash
-    # On Windows
-    venv\Scripts\activate
-    
-    # On macOS/Linux
-    source venv/bin/activate
-    ```
-3.  Install the required Python packages:
-    ```bash
-    pip install -r requirements.txt
-    ```
-4.  Start the backend server:
-    ```bash
-    python main.py
-    ```
-    The backend will be running at `http://localhost:8000` (or the port you specified).
+### 2. Triển khai Backend
 
-#### Step 3: Run the Frontend
+```bash
+cd backend
+python -m venv venv
+# Windows: venv\Scripts\activate | Unix: source venv/bin/activate
+pip install -r requirements.txt
+python main.py
+```
 
-1.  In a **new terminal**, navigate to the project root.
-2.  Install the Node.js dependencies:
-    ```bash
-    npm install
-    ```
-3.  Start the frontend development server:
-    ```bash
-    npm run dev
-    ```
-    The frontend will be available at `http://localhost:9002`.
+### 3. Triển khai Frontend
 
----
+```bash
+npm install
+npm run dev
+```
+Truy cập ứng dụng tại: `http://localhost:9002`
 
-### 2. Docker-Based Development
+### 4. Sử dụng Docker (Khuyên dùng)
 
-**Prerequisites:**
-- Docker and Docker Compose
-- A Google Gemini API Key
-
-#### Step 1: Configure Environment
-
-1.  Create a `.env` file from the template:
-    ```bash
-    cp .env.example .env
-    ```
-2.  Edit the `.env` file with your details. The same variables are used for the Docker setup.
-    ```env
-    GEMINI_API_KEY="your_gemini_api_key_here"
-    NEXT_PUBLIC_BACKEND_PORT=8000
-    ```
-
-#### Step 2: Launch with Docker Compose
-
-Build and start all services in detached mode:
 ```bash
 docker compose up --build -d
 ```
 
-#### Step 3: Access the Application
+## 🔌 Kết nối MCP Servers
 
-- **Frontend**: [http://localhost:9002](http://localhost:9002)
-- **Backend API**: `http://localhost:8000` (or your specified port)
-- **Backend Health Check**: `http://localhost:8000/health`
+Để mở rộng khả năng của **Ethereal Intelligence**, bạn có thể thêm các URL của MCP Server vào mục Settings:
+- Ví dụ: `http://localhost:5000/mcp` (Server quản lý file, tra cứu database, hoặc điều khiển hệ thống).
+- Agent sẽ tự động nhận diện các Tools khả dụng và sử dụng chúng khi cần thiết dựa trên yêu cầu của bạn.
 
-For more detailed Docker commands and troubleshooting, see [DOCKER.md](DOCKER.md).
+---
 
-## ✨ Features
-
-- **Interactive Chat Interface**: Modern, clean, and intuitive UI with Markdown support.
-- **Flexible Model Support**: Switch between Gemini models (`gemini-1.5-flash`, `gemini-1.5-pro`) and adjust parameters like temperature.
-- **MCP Server Integration**: Dynamically add custom tool servers via URL, which are then available to the LangChain agent.
-- **Smart Storage**: Chat history and settings are persisted in `localStorage`.
-- **Modern Dark Theme**: A sleek dark theme for a great user experience.
-
-## 📦 Tech Stack
-
-- **Frontend**: Next.js, React, TypeScript, Tailwind CSS, Radix UI, Zustand, Framer Motion
-- **Backend**: FastAPI, Python, LangChain, Google Generative AI
-- **Containerization**: Docker & Docker Compose
+**Ethereal Intelligence** — *Fluid. Intelligent. Boundless.*
