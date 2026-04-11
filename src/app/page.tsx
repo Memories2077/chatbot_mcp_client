@@ -1,4 +1,32 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useChatStore } from "@/lib/hooks/use-chat-store";
+
 export default function Home() {
+  const [prompt, setPrompt] = useState("");
+  const router = useRouter();
+  const { sendMessage, clearMessages } = useChatStore();
+
+  const handleStartChat = () => {
+    if (prompt.trim()) {
+      // Always start a new chat from landing page by clearing previous session
+      clearMessages(); 
+      sendMessage(prompt.trim());
+      router.push("/chat");
+    } else {
+      router.push("/chat");
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      handleStartChat();
+    }
+  };
+
   return (
     <main className="flex-1 overflow-y-auto px-8 pb-12 pt-4 scroll-smooth">
       <div className="flex flex-col items-center justify-center min-h-[80vh] text-center z-10 py-12">
@@ -22,7 +50,10 @@ export default function Home() {
         </p>
         
         <div className="flex flex-col sm:flex-row gap-4 mb-20">
-          <button className="px-10 py-5 bg-gradient-to-r from-primary to-primary-container text-on-primary-container rounded-full font-bold text-lg shadow-[0_10px_30px_rgba(178,153,255,0.3)] hover:scale-105 active:scale-95 transition-all">
+          <button 
+            onClick={handleStartChat}
+            className="px-10 py-5 bg-gradient-to-r from-primary to-primary-container text-on-primary-container rounded-full font-bold text-lg shadow-[0_10px_30px_rgba(178,153,255,0.3)] hover:scale-105 active:scale-95 transition-all flex items-center justify-center"
+          >
             Start Chatting Now
           </button>
           <button className="px-10 py-5 bg-surface-container/60 backdrop-blur-xl border border-outline-variant/20 text-on-surface rounded-full font-bold text-lg hover:bg-surface-bright transition-all">
@@ -80,8 +111,14 @@ export default function Home() {
             className="bg-transparent border-none focus:outline-none focus:ring-0 flex-1 text-on-surface placeholder:text-on-surface-variant/50"
             placeholder="Type your first command here..."
             type="text"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={handleKeyDown}
           />
-          <button className="w-10 h-10 rounded-full bg-primary text-on-primary-container flex items-center justify-center mr-2">
+          <button 
+            onClick={handleStartChat}
+            className="w-10 h-10 rounded-full bg-primary text-on-primary-container flex items-center justify-center mr-2 hover:scale-110 active:scale-90 transition-all"
+          >
             <span className="material-symbols-outlined">arrow_upward</span>
           </button>
         </div>

@@ -21,6 +21,7 @@ export const getBackendUrl = (): string => {
 export const BACKEND_API = {
     chat: () => `${getBackendUrl()}/chat`,
     health: () => `${getBackendUrl()}/health`,
+    mcpMetadata: () => `${getBackendUrl()}/mcp/metadata`,
 };
 
 export const MODEL_CONFIG = {

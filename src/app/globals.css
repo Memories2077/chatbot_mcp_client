@@ -10,69 +10,69 @@
   }
 
   body {
-    @apply bg-background text-on-surface font-body selection:bg-primary/30;
-    min-height: 100vh;
-  }
-
-  /* Custom Scrollbar */
-  ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-  ::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  ::-webkit-scrollbar-thumb {
-    background-color: rgba(255, 255, 255, 0.1);
-    border-radius: 10px;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(255, 255, 255, 0.2);
+    @apply bg-background text-on-surface font-body selection:bg-primary/30 antialiased;
   }
 }
 
-@layer utilities {
-  .glass-panel {
-    @apply backdrop-blur-xl bg-surface-container-low/60;
-  }
-
-  .living-canvas-bg {
-    background: 
-      radial-gradient(
-        circle at 0% 0%,
-        rgba(178, 153, 255, 0.08) 0%,
-        transparent 50%
-      ),
-      radial-gradient(
-        circle at 100% 100%,
-        rgba(60, 221, 199, 0.05) 0%,
-        transparent 50%
-      );
-  }
-
-  .dynamic-bg {
-    background: radial-gradient(
-      circle at 50% 50%,
-      #08151b 0%,
-      #060f15 100%
-    );
-  }
-
-  .ai-glow {
-    filter: drop-shadow(0 0 40px rgba(178, 153, 255, 0.15));
-  }
+/* Custom Scrollbar for a premium look */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
 }
 
-/* Material Symbols configuration */
-.material-symbols-outlined {
-  font-variation-settings:
-    "FILL" 0,
-    "wght" 400,
-    "GRAD" 0,
-    "opsz" 24;
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
 }
 
-/* Typography Helpers (matching mockup) */
+::-webkit-scrollbar-thumb {
+  @apply bg-surface-variant/30 rounded-full hover:bg-surface-variant/50 transition-colors;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Glassmorphism effects */
+.glass-panel {
+  @apply bg-surface-container-low/60 backdrop-blur-2xl border border-outline-variant/10 shadow-2xl;
+}
+
+/* The Living Canvas Background Animation */
+.living-canvas-bg {
+  background: radial-gradient(circle at 50% 50%, #0c1b23 0%, #060f15 100%);
+}
+
+/* Toast Customization */
+[data-radix-toast-viewport] {
+  @apply fixed bottom-0 right-0 flex flex-col p-6 gap-2 w-full max-w-[420px] m-0 list-none z-[100] outline-none;
+}
+
+.ethereal-toast {
+  @apply bg-surface-container-highest/80 backdrop-blur-xl border border-primary/20 text-on-surface rounded-2xl p-4 shadow-[0_10px_40px_rgba(0,0,0,0.5)] flex items-start gap-4 transition-all duration-300;
+}
+
+.ethereal-toast[data-state='open'] {
+  @apply animate-in slide-in-from-right-full duration-500;
+}
+
+.ethereal-toast[data-state='closed'] {
+  @apply animate-out fade-out-0 scale-95 duration-300;
+}
+
+.ethereal-toast-success {
+  @apply border-primary/40 shadow-[0_0_20px_rgba(178,153,255,0.1)];
+}
+
+.ethereal-toast-error {
+  @apply border-error/40 shadow-[0_0_20px_rgba(253,111,133,0.1)];
+}
+
+/* Type Scales & Helpers (matching mockup) */
 .display-lg {
   @apply text-[3.5rem] leading-[1] font-extrabold tracking-tight;
 }

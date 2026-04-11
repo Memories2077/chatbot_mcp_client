@@ -1,21 +1,47 @@
-import type { Metadata } from 'next';
+"use client";
+
+import { useEffect } from 'react';
 import './globals.css';
 import { Toaster } from '@/components/ui/toaster';
 import { cn } from '@/lib/utils';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { Header } from '@/components/layout/Header';
 import { SidebarProvider } from '@/components/ui/sidebar';
-
-export const metadata: Metadata = {
-  title: 'Ethereal Intelligence',
-  description: 'An intelligent chat interface for Gemini models with tool integration.',
-};
+import { useChatStore } from '@/lib/hooks/use-chat-store';
 
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Expose debug commands to console
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).chatHistory = () => {
+        const history = useChatStore.getState().history;
+        console.log("=== ETHEREAL CHAT HISTORY ===");
+        console.table(history.map(h => ({
+          id: h.id,
+          title: h.title,
+          messages: h.messages.length,
+          timestamp: new Date(h.timestamp).toLocaleString()
+        })));
+        return "History printed above.";
+      };
+
+      (window as any).purge = () => {
+        if (confirm("Are you sure you want to purge all local storage data? This will clear history and settings.")) {
+          localStorage.clear();
+          window.location.reload();
+          return "System purged and reloading...";
+        }
+        return "Purge cancelled.";
+      };
+
+      console.log("🛠️ Debug commands loaded: type 'chatHistory()' or 'purge()' in console.");
+    }
+  }, []);
+
   return (
     <html lang="en" className="dark">
       <head>
@@ -38,7 +64,7 @@ export default function RootLayout({
         </div>
 
         <div className="flex h-screen overflow-hidden relative">
-          <SidebarProvider>
+          <SidebarProvider defaultOpen={false}>
             <Sidebar />
             <div className="flex-1 flex flex-col relative overflow-hidden">
               <Header />
