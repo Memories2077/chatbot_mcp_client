@@ -19,7 +19,7 @@ export interface McpServer {
 }
 
 export interface ChatSettings {
-  provider: 'gemini' | 'groq';
+  provider: 'gemini' | 'groq' | 'metaclaw';
   model: string;
   temperature: number;
   maxTokens: number;
