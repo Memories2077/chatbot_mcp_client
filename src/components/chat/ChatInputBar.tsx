@@ -7,13 +7,13 @@ import { cn } from "@/lib/utils";
 const contextChips = [
   { icon: "brush", label: "Style Guide" },
   { icon: "image", label: "Reference Images" },
-  { icon: "code", label: "Export Specs" },
+  { icon: "terminal", label: "Create MCP Server", isToggle: true },
 ];
 
 export function ChatInputBar() {
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { sendMessage, isLoading } = useChatStore();
+  const { sendMessage, isLoading, isMcpMode, toggleMcpMode } = useChatStore();
   const prevLoadingRef = useRef(isLoading);
 
   const handleSend = () => {
@@ -68,7 +68,7 @@ export function ChatInputBar() {
             ref={textareaRef}
             rows={1}
             className="flex-1 bg-transparent border-none focus:outline-none focus:ring-0 text-on-surface placeholder-on-surface-variant/50 text-lg py-3 resize-none no-scrollbar max-h-[200px] leading-relaxed"
-            placeholder="Design the future with Ethereal..."
+            placeholder={isMcpMode ? "Insert your API Description..." : "Design the future with Ethereal..."}
             value={text}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
@@ -85,22 +85,31 @@ export function ChatInputBar() {
               disabled={!text.trim() || isLoading}
               className="w-10 h-10 rounded-full bg-gradient-to-r from-primary to-primary-container text-on-primary-container flex items-center justify-center transition-all duration-300 hover:shadow-lg hover:shadow-primary/30 active:scale-90 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed"
             >
-              <span className="material-symbols-outlined text-[20px]">send</span>
+              <span className="material-symbols-outlined text-[20px]">arrow_upward</span>
             </button>
           </div>
         </div>
 
         {/* Context Chips */}
         <div className="flex gap-2 mt-4 ml-6 overflow-x-auto pb-2 no-scrollbar font-label">
-          {contextChips.map((chip) => (
-            <span
-              key={chip.label}
-              className="bg-surface-container-low px-3 py-1 rounded-full text-xs font-medium text-on-surface-variant flex items-center gap-1 cursor-pointer hover:bg-surface-container transition-colors whitespace-nowrap"
-            >
-              <span className="material-symbols-outlined text-[14px]">{chip.icon}</span>
-              {chip.label}
-            </span>
-          ))}
+          {contextChips.map((chip) => {
+            const isSelected = chip.isToggle && isMcpMode;
+            return (
+              <span
+                key={chip.label}
+                onClick={() => chip.isToggle && toggleMcpMode()}
+                className={cn(
+                  "px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1 cursor-pointer transition-all duration-300 whitespace-nowrap border border-transparent",
+                  isSelected
+                    ? "bg-primary/20 text-primary border-primary/30 shadow-[0_0_15px_rgba(var(--primary-rgb),0.2)]"
+                    : "bg-surface-container-low text-on-surface-variant hover:bg-surface-container"
+                )}
+              >
+                <span className="material-symbols-outlined text-[14px]">{chip.icon}</span>
+                {chip.label}
+              </span>
+            );
+          })}
         </div>
       </div>
     </div>
