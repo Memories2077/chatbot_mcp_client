@@ -1,19 +1,65 @@
-node_modules
-.next
-dist
-build
+# Dependency directories
+node_modules/
+jspm_packages/
+venv/
+.venv/
+env/
+
+.qwen/
+# Next.js & Build output
+.next/
+out/
+build/
+dist/
+.idx/
+
+# Logs
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# OS specific files
 .DS_Store
-.env.local
-.env.*.local
-__pycache__
-*.pyc
-.git
+.DS_Store?
+._*
+Thumbs.db
+desktop.ini
+
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+*.bak
+
+# Git
+.git/
 .gitignore
+
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets.json
+
+# Python cache
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Docker configuration
+Dockerfile*
+.dockerignore
+docker-compose.yml
+docker-compose.yaml
+
+# Documentation & Assets (Thường không cần trong runtime image)
 README.md
-.md
-.git
-.gitignore
+docs/
+history.md
+img/
+GEMINI.md

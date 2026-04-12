@@ -18,10 +18,15 @@ export const getBackendUrl = (): string => {
     return `http://localhost:${port}`;
 };
 
+export const getLangGraphUrl = (): string => {
+    return process.env.NEXT_PUBLIC_LANGGRAPH_API_URL || 'http://localhost:2024';
+};
+
 export const BACKEND_API = {
     chat: () => `${getBackendUrl()}/chat`,
     health: () => `${getBackendUrl()}/health`,
     mcpMetadata: () => `${getBackendUrl()}/mcp/metadata`,
+    langgraph: () => getLangGraphUrl(),
 };
 
 export const MODEL_CONFIG = {
@@ -43,6 +48,16 @@ export const MODEL_CONFIG = {
       'openai/gpt-oss-20b',
       'groq/compound',
       'groq/compound-mini',
+    ],
+  },
+  metaclaw: {
+    defaultModel: 'gemini-2.5-flash',
+    models: [
+      'gemini-2.5-flash',
+      'gemini-2.5-pro',
+      'llama-3.3-70b-versatile',
+      'qwen/qwen3-32b',
+      'claude-3-5-sonnet-20241022'
     ],
   },
 };

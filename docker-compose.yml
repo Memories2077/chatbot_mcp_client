@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   # Backend Service - FastAPI
@@ -9,14 +9,21 @@ services:
       args:
         - NEXT_PUBLIC_BACKEND_PORT=${NEXT_PUBLIC_BACKEND_PORT:-8000}
     container_name: gemini-backend
+    env_file:
+      - .env
     environment:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - PYTHONUNBUFFERED=1
       - NEXT_PUBLIC_BACKEND_PORT=${NEXT_PUBLIC_BACKEND_PORT:-8000}
+      - NEXT_PUBLIC_LANGGRAPH_API_URL=http://agent-service:2024
     ports:
       - "${NEXT_PUBLIC_BACKEND_PORT:-8000}:${NEXT_PUBLIC_BACKEND_PORT:-8000}"
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import requests,sys; r=requests.get('http://localhost:${NEXT_PUBLIC_BACKEND_PORT:-8000}/health'); sys.exit(0 if 200 <= r.status_code < 400 else 1)\""]
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import requests,sys; r=requests.get(''http://localhost:${NEXT_PUBLIC_BACKEND_PORT:-8000}/health''); sys.exit(0 if 200 <= r.status_code < 400 else 1)"',
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -25,6 +32,7 @@ services:
     restart: unless-stopped
     networks:
       - gemini-network
+      - mcp-network
     volumes:
       - ./backend:/app/backend
 
@@ -36,8 +44,11 @@ services:
       args:
         - NEXT_PUBLIC_BACKEND_URL=http://localhost:${NEXT_PUBLIC_BACKEND_PORT:-8000}
     container_name: gemini-frontend
+    env_file:
+      - .env
     environment:
       - NEXT_PUBLIC_BACKEND_URL=http://localhost:${NEXT_PUBLIC_BACKEND_PORT:-8000}
+      - NEXT_PUBLIC_LANGGRAPH_API_URL=http://agent-service:2024
       - NODE_ENV=production
     ports:
       - "9002:9002"
@@ -45,7 +56,11 @@ services:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:9002', res=>{ process.exit((res.statusCode>=200 && res.statusCode<400)?0:1) })\""]
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "require(''http'').get(''http://localhost:9002'', res=>{ process.exit((res.statusCode>=200 && res.statusCode<400)?0:1) })"',
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -53,6 +68,7 @@ services:
     restart: unless-stopped
     networks:
       - gemini-network
+      - mcp-network
     volumes:
       - ./src:/app/src
       - ./public:/app/public
@@ -60,6 +76,8 @@ services:
 networks:
   gemini-network:
     driver: bridge
+  mcp-network:
+    external: true
 
 volumes:
   backend-data:
