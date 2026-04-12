@@ -7,11 +7,13 @@ WORKDIR /app
 ARG NEXT_PUBLIC_BACKEND_URL
 ENV NEXT_PUBLIC_BACKEND_URL=$NEXT_PUBLIC_BACKEND_URL
 
-# Copy package files
+# Copy package files first
 COPY package.json package-lock.json ./
 
-# Install dependencies
-RUN npm ci
+# Set npm config and install dependencies
+RUN npm config set fund false && \
+    npm config set audit false && \
+    npm ci --no-audit --no-fund
 
 # Copy source code
 COPY . .
@@ -24,15 +26,16 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy package files
+# Copy package files first
 COPY package.json package-lock.json ./
 
-# Install production dependencies only
-RUN npm ci --only=production
+# Set npm config and install production dependencies
+RUN npm config set fund false && \
+    npm config set audit false && \
+    npm ci --omit=dev --no-audit --no-fund
 
 # Copy built application from builder
 COPY --from=builder /app/.next ./.next
-COPY --from=builder /app/.idx ./idx
 
 # Copy entrypoint script
 COPY entrypoint.sh .
@@ -42,4 +45,4 @@ RUN chmod +x entrypoint.sh
 EXPOSE 9002
 
 # Run entrypoint script
-ENTRYPOINT ["./entrypoint.sh"]
+ENTRYPOINT ["sh", "entrypoint.sh"]
