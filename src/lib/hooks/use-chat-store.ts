@@ -164,6 +164,18 @@ export const useChatStore = create<ChatState>()(
         } = get();
         
         const settings = overrideSettings || currentSettings;
+
+        const formatBotResponse = (content: string) => {
+          if (!content) return content;
+          const trimmed = content.trim();
+          if (trimmed.startsWith('{') && trimmed.includes('"mcpServers"')) {
+            if (!trimmed.includes('```')) {
+              return "```json\n" + trimmed + "\n```";
+            }
+          }
+          return content;
+        };
+
         
         // Ensure we have a local chat ID
         let chatId = currentChatId;
@@ -223,35 +235,160 @@ export const useChatStore = create<ChatState>()(
             }));
 
             let fullContent = "";
+            let lastMessageId = "";
+
+            /**
+             * Extract text content from various LangGraph message formats
+             */
+            const extractContent = (content: any): string => {
+              if (typeof content === 'string') return content;
+              
+              if (Array.isArray(content)) {
+                if (content.length > 0 && typeof content[0] === 'object' && content[0] !== null && 'type' in content[0]) {
+                  return content.map((c: any) => {
+                    if (typeof c === 'string') return c;
+                    if (c && typeof c === 'object') {
+                      if (c.type === 'text' && c.text) return c.text;
+                      if (c.text) return c.text;
+                    }
+                    return '';
+                  }).join('');
+                }
+                return content.map(c => {
+                  if (typeof c === 'string') return c;
+                  if (c && typeof c === 'object' && 'content' in c) return extractContent(c.content);
+                  return '';
+                }).join('');
+              }
+
+              if (content && typeof content === 'object') {
+                if ('text' in content && typeof content.text === 'string') return content.text;
+                if ('content' in content) return extractContent(content.content);
+              }
+              return '';
+            };
+
+            /**
+             * Helper to extract message from various event formats
+             */
+            const getMessageFromData = (data: any): any => {
+              if (!data) return null;
+              if (Array.isArray(data) && data.length === 2 && typeof data[0] === 'object' && data[0] !== null && 'content' in data[0]) {
+                return data[0];
+              }
+              if (typeof data === 'object' && 'content' in data) {
+                return data;
+              }
+              return null;
+            };
+
             const stream = client.runs.stream(
               lgThreadId,
               ASSISTANT_ID,
               {
                 input: { messages: historyForLangGraph },
-                streamMode: "messages",
+                streamMode: ["messages", "values"],
                 config: { configurable: { model_name: settings.model } }
               }
             );
 
             for await (const chunk of stream) {
-              if (chunk.event === "messages" && Array.isArray(chunk.data)) {
-                const msgChunk = chunk.data[0];
-                if (msgChunk && msgChunk.content) {
-                  const content = typeof msgChunk.content === 'string' 
-                    ? msgChunk.content 
-                    : (Array.isArray(msgChunk.content) ? msgChunk.content.map((c: any) => c.text || '').join('') : '');
-                    
-                  if (content) {
-                    fullContent += content;
-                    set((state) => ({
-                      messages: state.messages.map((m) =>
-                        m.id === aiMessageId ? { ...m, content: fullContent } : m
-                      ),
-                    }));
+              console.log(`[LangGraph Stream] event="${chunk.event}"`, chunk.data);
+
+              if (chunk.event === "messages" || chunk.event === "messages/partial") {
+                const dataList = Array.isArray(chunk.data) ? chunk.data : [chunk.data];
+                
+                for (const item of dataList) {
+                  const msg = getMessageFromData(item);
+                  if (msg && msg.content) {
+                    const content = extractContent(msg.content);
+                    const msgId = msg.id || "default";
+
+                    if (content) {
+                      if (msgId !== lastMessageId) {
+                        console.log(`[LangGraph Stream] New message ID: ${msgId}`);
+                        // If switching agents/messages, either append or replace depending on content
+                        if (fullContent.length < 50 || content.includes("Configuration:") || content.includes("{")) {
+                          fullContent = content;
+                        } else {
+                          fullContent += "\n\n" + content;
+                        }
+                        lastMessageId = msgId;
+                      } else {
+                        if (chunk.event === "messages/partial") {
+                          fullContent += content;
+                        } else {
+                          fullContent = content;
+                        }
+                      }
+
+                      set((state) => ({
+                        messages: state.messages.map((m) =>
+                          m.id === aiMessageId ? { ...m, content: formatBotResponse(fullContent) } : m
+                        ),
+                      }));
+                    }
                   }
                 }
               }
+
+              if (chunk.event === "values" && chunk.data) {
+                const values = chunk.data as Record<string, unknown>;
+                const finalResp = values?.final_response as string | undefined;
+                if (finalResp && finalResp.length > 0) {
+                  fullContent = finalResp;
+                  set((state) => ({
+                    messages: state.messages.map((m) =>
+                      m.id === aiMessageId ? { ...m, content: formatBotResponse(fullContent) } : m
+                    ),
+                  }));
+                }
+              }
             }
+
+            // --- Final fallback: fetch thread state if still empty ---
+            if (!fullContent) {
+              console.log("[LangGraph Stream] ⚠️ Stream ended with empty content. Fetching thread state...");
+              try {
+                const thread = await client.threads.get(lgThreadId);
+                const threadValues = thread?.values as Record<string, unknown> | undefined;
+                const finalResp = threadValues?.final_response as string | undefined;
+                if (finalResp) {
+                  fullContent = finalResp;
+                  set((state) => ({
+                    messages: state.messages.map((m) =>
+                      m.id === aiMessageId ? { ...m, content: formatBotResponse(fullContent) } : m
+                    ),
+                  }));
+                } else {
+                  const msgs = threadValues?.messages as any[] | undefined;
+                  if (msgs && msgs.length > 0) {
+                    const lastMsg = msgs[msgs.length - 1];
+                    const actualLastMsg = Array.isArray(lastMsg) ? lastMsg[0] : lastMsg;
+                    const c = actualLastMsg?.content ? extractContent(actualLastMsg.content) : '';
+                    if (c) {
+                      fullContent = c;
+                      set((state) => ({
+                        messages: state.messages.map((m) =>
+                          m.id === aiMessageId ? { ...m, content: formatBotResponse(fullContent) } : m
+                        ),
+                      }));
+                    }
+                  }
+                }
+              } catch (fetchErr) {
+                console.error("[LangGraph Fallback] Failed to fetch thread state:", fetchErr);
+              }
+            }
+
+            if (!fullContent) {
+              set((state) => ({
+                messages: state.messages.map((m) =>
+                  m.id === aiMessageId ? { ...m, content: "⚠️ The agent processed your request but returned an empty response." } : m
+                ),
+              }));
+            }
+
             persistCurrentChat();
           } catch (error: any) {
             console.error("Error calling LangGraph:", error);
@@ -298,7 +435,7 @@ export const useChatStore = create<ChatState>()(
             const modelMessage: ChatMessage = {
               id: uuidv4(),
               role: "model",
-              content: data.response,
+              content: formatBotResponse(data.response),
               timestamp: new Date().toISOString(),
             };
 
