@@ -1,6 +1,19 @@
 # Project History
 ---
 
+## [2026-04-14] MCP Streaming UI Polishing & Duplication Fix
+
+### Overview
+Enhanced MCP response rendering with structured delegate/context cards, success summaries, and more stable LangGraph stream handling to prevent duplicate or empty server result bubbles.
+
+### Changes
+- **Structured MCP output**: Added `DelegateBox`, `EnrichedContextBox`, and `McpSuccessCard` in `src/components/chat/chat-message.tsx` to render `DELEGATE_TO_EXAMINER`, `DELEGATE_TO_GENERATOR`, `ENRICHED_CONTEXT (RAG)`, and MCP success payloads as interactive, collapsible sections.
+- **Better MCP feedback**: Added copy-to-clipboard support, status indicators, and JSON configuration previews for successful MCP server creations.
+- **Streaming robustness**: Updated `src/lib/hooks/use-chat-store.ts` to track LangGraph message IDs and deduplicate repeated chunk events, avoiding stale or duplicated AI content during MCP creation.
+- **Empty bubble fix**: Improved MCP stream handling so the AI message content is accumulated and updated cleanly, preventing blank model bubbles during initial LangGraph streaming.
+
+---
+
 ## [2026-04-13] MCP Configuration UI Formatting
 
 ### Overview
