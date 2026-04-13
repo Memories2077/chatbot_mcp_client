@@ -1,4 +1,3 @@
-version: "3.8"
 
 services:
   # Backend Service - FastAPI
@@ -43,12 +42,13 @@ services:
       dockerfile: Dockerfile.frontend
       args:
         - NEXT_PUBLIC_BACKEND_URL=http://localhost:${NEXT_PUBLIC_BACKEND_PORT:-8000}
+        - NEXT_PUBLIC_LANGGRAPH_API_URL=http://localhost:2024
     container_name: gemini-frontend
     env_file:
       - .env
     environment:
       - NEXT_PUBLIC_BACKEND_URL=http://localhost:${NEXT_PUBLIC_BACKEND_PORT:-8000}
-      - NEXT_PUBLIC_LANGGRAPH_API_URL=http://agent-service:2024
+      - NEXT_PUBLIC_LANGGRAPH_API_URL=http://localhost:2024
       - NODE_ENV=production
     ports:
       - "9002:9002"
