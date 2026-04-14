@@ -164,6 +164,18 @@ export const useChatStore = create<ChatState>()(
         } = get();
         
         const settings = overrideSettings || currentSettings;
+
+        const formatBotResponse = (content: string) => {
+          if (!content) return content;
+          const trimmed = content.trim();
+          if (trimmed.startsWith('{') && trimmed.includes('"mcpServers"')) {
+            if (!trimmed.includes('```')) {
+              return "```json\n" + trimmed + "\n```";
+            }
+          }
+          return content;
+        };
+
         
         // Ensure we have a local chat ID
         let chatId = currentChatId;
@@ -187,13 +199,9 @@ export const useChatStore = create<ChatState>()(
 
         // --- BRANCH 1: Create MCP Server (LangGraph Streaming) ---
         if (isMcpMode) {
-          const historyForLangGraph = updatedMessages.map((msg) => ({
-            role: msg.role === "model" ? "assistant" : (msg.role === "user" ? "user" : "system") as any,
-            content: msg.content,
-          }));
-
           try {
             const client = createLangGraphClient();
+            // Reusing Thread ID if possible
             let lgThreadId: string | undefined = undefined;
             try {
               const existingThreads = await client.threads.search({
@@ -211,38 +219,48 @@ export const useChatStore = create<ChatState>()(
             }
 
             const aiMessageId = uuidv4();
-            const initialAiMessage: ChatMessage = {
-              id: aiMessageId,
-              role: "model",
-              content: "",
-              timestamp: new Date().toISOString(),
-            };
-            
             set((state) => ({
-              messages: [...state.messages, initialAiMessage],
+              messages: [...state.messages, {
+                id: aiMessageId,
+                role: "model",
+                content: "",
+                timestamp: new Date().toISOString(),
+              }],
             }));
 
             let fullContent = "";
+            let lastLength = 0;
+            let lastMsgId = '';
+            const streamedIds = new Set<string>();
+
             const stream = client.runs.stream(
               lgThreadId,
               ASSISTANT_ID,
               {
-                input: { messages: historyForLangGraph },
+                input: { messages: [{ role: "user", content: text }] }, // chỉ prompt hiện tại
                 streamMode: "messages",
                 config: { configurable: { model_name: settings.model } }
               }
             );
 
             for await (const chunk of stream) {
-              if (chunk.event === "messages" && Array.isArray(chunk.data)) {
+              if (chunk.event === "error") {
+                console.error("LangGraph error:", chunk.data);
+              }
+
+              else if (chunk.event === "messages/partial" && Array.isArray(chunk.data)) {
                 const msgChunk = chunk.data[0];
-                if (msgChunk && msgChunk.content) {
-                  const content = typeof msgChunk.content === 'string' 
-                    ? msgChunk.content 
-                    : (Array.isArray(msgChunk.content) ? msgChunk.content.map((c: any) => c.text || '').join('') : '');
-                    
-                  if (content) {
-                    fullContent += content;
+                if (typeof msgChunk.content === 'string' && msgChunk.content.length > 0) {
+                  if (msgChunk.id !== lastMsgId) {
+                    lastLength = 0;
+                    lastMsgId = msgChunk.id;
+                  }
+                  streamedIds.add(msgChunk.id);
+                  const newPart = msgChunk.content.substring(lastLength);
+                  lastLength = msgChunk.content.length;
+
+                  if (newPart) {
+                    fullContent += newPart;
                     set((state) => ({
                       messages: state.messages.map((m) =>
                         m.id === aiMessageId ? { ...m, content: fullContent } : m
@@ -251,24 +269,38 @@ export const useChatStore = create<ChatState>()(
                   }
                 }
               }
+
+              else if (chunk.event === "messages/complete" && Array.isArray(chunk.data)) {
+                const msgChunk = chunk.data[0];
+                if (typeof msgChunk.content === 'string' && !streamedIds.has(msgChunk.id)) {
+                  fullContent += (fullContent ? '\n' : '') + msgChunk.content;
+                  set((state) => ({
+                    messages: state.messages.map((m) =>
+                      m.id === aiMessageId ? { ...m, content: fullContent } : m
+                    ),
+                  }));
+                }
+                lastLength = 0;
+                lastMsgId = '';
+              }
             }
+
             persistCurrentChat();
           } catch (error: any) {
             console.error("Error calling LangGraph:", error);
-            const errorMessage: ChatMessage = {
-              id: uuidv4(),
-              role: "system",
-              content: error.message || "Failed to connect to Agent service.",
-              timestamp: new Date().toISOString(),
-            };
             set((state) => ({
-              messages: [...state.messages, errorMessage],
+              messages: [...state.messages, {
+                id: uuidv4(),
+                role: "system",
+                content: error.message || "Failed to connect to Agent service.",
+                timestamp: new Date().toISOString(),
+              }],
               lastActive: Date.now(),
             }));
           } finally {
             set({ isLoading: false });
           }
-        } 
+        }
         // --- BRANCH 2: Casual Talk (Legacy FastAPI /chat) ---
         else {
           const historyForBackend = updatedMessages.map((msg) => ({
@@ -298,7 +330,7 @@ export const useChatStore = create<ChatState>()(
             const modelMessage: ChatMessage = {
               id: uuidv4(),
               role: "model",
-              content: data.response,
+              content: formatBotResponse(data.response),
               timestamp: new Date().toISOString(),
             };
 

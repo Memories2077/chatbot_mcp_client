@@ -145,7 +145,7 @@ async def get_or_create_agent(provider: str, model_name: str, mcp_urls: List[str
             )
         elif provider == "metaclaw":
             api_key = os.getenv("METACLAW_API_KEY", "metaclaw")
-            base_url = os.getenv("METACLAW_BASE_URL", "http://localhost:30000/v1")
+            base_url = os.getenv("METACLAW_BASE_URL", "http://host.docker.internal:30000/v1")
             from langchain_openai import ChatOpenAI
             llm = ChatOpenAI(
                 model=model_name,

@@ -1,5 +1,7 @@
 # MetaClaw Integration Proposal
 
+> **Note:** This proposal has been merged into the comprehensive [METACLAW_INTEGRATION.md](./METACLAW_INTEGRATION.md) document, which contains the full implementation plan, testing strategy, and configuration reference. This file is kept for historical context.
+
 ## 📐 Current Architecture
 
 ```
