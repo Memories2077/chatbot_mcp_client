@@ -199,13 +199,9 @@ export const useChatStore = create<ChatState>()(
 
         // --- BRANCH 1: Create MCP Server (LangGraph Streaming) ---
         if (isMcpMode) {
-          const historyForLangGraph = updatedMessages.map((msg) => ({
-            role: msg.role === "model" ? "assistant" : (msg.role === "user" ? "user" : "system") as any,
-            content: msg.content,
-          }));
-
           try {
             const client = createLangGraphClient();
+            // Reusing Thread ID if possible
             let lgThreadId: string | undefined = undefined;
             try {
               const existingThreads = await client.threads.search({
@@ -223,189 +219,88 @@ export const useChatStore = create<ChatState>()(
             }
 
             const aiMessageId = uuidv4();
-            const initialAiMessage: ChatMessage = {
-              id: aiMessageId,
-              role: "model",
-              content: "",
-              timestamp: new Date().toISOString(),
-            };
-            
             set((state) => ({
-              messages: [...state.messages, initialAiMessage],
+              messages: [...state.messages, {
+                id: aiMessageId,
+                role: "model",
+                content: "",
+                timestamp: new Date().toISOString(),
+              }],
             }));
 
             let fullContent = "";
-            let lastMessageId = "";
-
-            /**
-             * Extract text content from various LangGraph message formats
-             */
-            const extractContent = (content: any): string => {
-              if (typeof content === 'string') return content;
-              
-              if (Array.isArray(content)) {
-                if (content.length > 0 && typeof content[0] === 'object' && content[0] !== null && 'type' in content[0]) {
-                  return content.map((c: any) => {
-                    if (typeof c === 'string') return c;
-                    if (c && typeof c === 'object') {
-                      if (c.type === 'text' && c.text) return c.text;
-                      if (c.text) return c.text;
-                    }
-                    return '';
-                  }).join('');
-                }
-                return content.map(c => {
-                  if (typeof c === 'string') return c;
-                  if (c && typeof c === 'object' && 'content' in c) return extractContent(c.content);
-                  return '';
-                }).join('');
-              }
-
-              if (content && typeof content === 'object') {
-                if ('text' in content && typeof content.text === 'string') return content.text;
-                if ('content' in content) return extractContent(content.content);
-              }
-              return '';
-            };
-
-            /**
-             * Helper to extract message from various event formats
-             */
-            const getMessageFromData = (data: any): any => {
-              if (!data) return null;
-              if (Array.isArray(data) && data.length === 2 && typeof data[0] === 'object' && data[0] !== null && 'content' in data[0]) {
-                return data[0];
-              }
-              if (typeof data === 'object' && 'content' in data) {
-                return data;
-              }
-              return null;
-            };
+            let lastLength = 0;
+            let lastMsgId = '';
+            const streamedIds = new Set<string>();
 
             const stream = client.runs.stream(
               lgThreadId,
               ASSISTANT_ID,
               {
-                input: { messages: historyForLangGraph },
-                streamMode: ["messages", "values"],
+                input: { messages: [{ role: "user", content: text }] }, // chỉ prompt hiện tại
+                streamMode: "messages",
                 config: { configurable: { model_name: settings.model } }
               }
             );
 
             for await (const chunk of stream) {
-              console.log(`[LangGraph Stream] event="${chunk.event}"`, chunk.data);
+              if (chunk.event === "error") {
+                console.error("LangGraph error:", chunk.data);
+              }
 
-              if (chunk.event === "messages" || chunk.event === "messages/partial") {
-                const dataList = Array.isArray(chunk.data) ? chunk.data : [chunk.data];
-                
-                for (const item of dataList) {
-                  const msg = getMessageFromData(item);
-                  if (msg && msg.content) {
-                    const content = extractContent(msg.content);
-                    const msgId = msg.id || "default";
+              else if (chunk.event === "messages/partial" && Array.isArray(chunk.data)) {
+                const msgChunk = chunk.data[0];
+                if (typeof msgChunk.content === 'string' && msgChunk.content.length > 0) {
+                  if (msgChunk.id !== lastMsgId) {
+                    lastLength = 0;
+                    lastMsgId = msgChunk.id;
+                  }
+                  streamedIds.add(msgChunk.id);
+                  const newPart = msgChunk.content.substring(lastLength);
+                  lastLength = msgChunk.content.length;
 
-                    if (content) {
-                      if (msgId !== lastMessageId) {
-                        console.log(`[LangGraph Stream] New message ID: ${msgId}`);
-                        // If switching agents/messages, either append or replace depending on content
-                        if (fullContent.length < 50 || content.includes("Configuration:") || content.includes("{")) {
-                          fullContent = content;
-                        } else {
-                          fullContent += "\n\n" + content;
-                        }
-                        lastMessageId = msgId;
-                      } else {
-                        if (chunk.event === "messages/partial") {
-                          fullContent += content;
-                        } else {
-                          fullContent = content;
-                        }
-                      }
-
-                      set((state) => ({
-                        messages: state.messages.map((m) =>
-                          m.id === aiMessageId ? { ...m, content: formatBotResponse(fullContent) } : m
-                        ),
-                      }));
-                    }
+                  if (newPart) {
+                    fullContent += newPart;
+                    set((state) => ({
+                      messages: state.messages.map((m) =>
+                        m.id === aiMessageId ? { ...m, content: fullContent } : m
+                      ),
+                    }));
                   }
                 }
               }
 
-              if (chunk.event === "values" && chunk.data) {
-                const values = chunk.data as Record<string, unknown>;
-                const finalResp = values?.final_response as string | undefined;
-                if (finalResp && finalResp.length > 0) {
-                  fullContent = finalResp;
+              else if (chunk.event === "messages/complete" && Array.isArray(chunk.data)) {
+                const msgChunk = chunk.data[0];
+                if (typeof msgChunk.content === 'string' && !streamedIds.has(msgChunk.id)) {
+                  fullContent += (fullContent ? '\n' : '') + msgChunk.content;
                   set((state) => ({
                     messages: state.messages.map((m) =>
-                      m.id === aiMessageId ? { ...m, content: formatBotResponse(fullContent) } : m
+                      m.id === aiMessageId ? { ...m, content: fullContent } : m
                     ),
                   }));
                 }
+                lastLength = 0;
+                lastMsgId = '';
               }
-            }
-
-            // --- Final fallback: fetch thread state if still empty ---
-            if (!fullContent) {
-              console.log("[LangGraph Stream] ⚠️ Stream ended with empty content. Fetching thread state...");
-              try {
-                const thread = await client.threads.get(lgThreadId);
-                const threadValues = thread?.values as Record<string, unknown> | undefined;
-                const finalResp = threadValues?.final_response as string | undefined;
-                if (finalResp) {
-                  fullContent = finalResp;
-                  set((state) => ({
-                    messages: state.messages.map((m) =>
-                      m.id === aiMessageId ? { ...m, content: formatBotResponse(fullContent) } : m
-                    ),
-                  }));
-                } else {
-                  const msgs = threadValues?.messages as any[] | undefined;
-                  if (msgs && msgs.length > 0) {
-                    const lastMsg = msgs[msgs.length - 1];
-                    const actualLastMsg = Array.isArray(lastMsg) ? lastMsg[0] : lastMsg;
-                    const c = actualLastMsg?.content ? extractContent(actualLastMsg.content) : '';
-                    if (c) {
-                      fullContent = c;
-                      set((state) => ({
-                        messages: state.messages.map((m) =>
-                          m.id === aiMessageId ? { ...m, content: formatBotResponse(fullContent) } : m
-                        ),
-                      }));
-                    }
-                  }
-                }
-              } catch (fetchErr) {
-                console.error("[LangGraph Fallback] Failed to fetch thread state:", fetchErr);
-              }
-            }
-
-            if (!fullContent) {
-              set((state) => ({
-                messages: state.messages.map((m) =>
-                  m.id === aiMessageId ? { ...m, content: "⚠️ The agent processed your request but returned an empty response." } : m
-                ),
-              }));
             }
 
             persistCurrentChat();
           } catch (error: any) {
             console.error("Error calling LangGraph:", error);
-            const errorMessage: ChatMessage = {
-              id: uuidv4(),
-              role: "system",
-              content: error.message || "Failed to connect to Agent service.",
-              timestamp: new Date().toISOString(),
-            };
             set((state) => ({
-              messages: [...state.messages, errorMessage],
+              messages: [...state.messages, {
+                id: uuidv4(),
+                role: "system",
+                content: error.message || "Failed to connect to Agent service.",
+                timestamp: new Date().toISOString(),
+              }],
               lastActive: Date.now(),
             }));
           } finally {
             set({ isLoading: false });
           }
-        } 
+        }
         // --- BRANCH 2: Casual Talk (Legacy FastAPI /chat) ---
         else {
           const historyForBackend = updatedMessages.map((msg) => ({
