@@ -9,8 +9,6 @@
 
 ---
 
-(./img/demo.gif)
-
 ## 🧠 Architecture: Brain + Arms
 
 Our core philosophy separates reasoning from execution to ensure maximum reliability and precision:
