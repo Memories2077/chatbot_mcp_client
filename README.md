@@ -9,7 +9,7 @@
 
 ---
 
-![Ethereal Intelligence Preview](./img/demo.gif)
+(./img/demo.gif)
 
 ## 🧠 Architecture: Brain + Arms
 
