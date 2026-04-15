@@ -1,200 +1,114 @@
-# Ethereal Intelligence
+# 🚀 Ethereal Intelligence: Unified MCP Ecosystem
 
-> A next-generation agentic chatbot platform with modern interface and unlimited extensibility through Model Context Protocol (MCP).
+[![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=next.js)](https://nextjs.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688?logo=fastapi)](https://fastapi.tiangolo.com/)
+[![Gemini](https://img.shields.io/badge/Gemini-2.0--Flash-4285F4?logo=google-gemini)](https://aistudio.google.com/)
+[![MetaClaw](https://img.shields.io/badge/MetaClaw-Enabled-blueviolet)](https://github.com/metaclaw)
 
 ![Ethereal Intelligence Preview](./img/demo.gif)
 
-## Overview
+---
 
-Ethereal Intelligence is an advanced agentic chatbot platform that combines cutting-edge AI models with a sophisticated user interface. Built on **Model Context Protocol (MCP)**, it enables seamless integration with external tools and services, empowering the AI assistant to execute complex tasks in real-time through intelligent tool orchestration.
+![Ethereal Intelligence Preview](./img/demo.gif)
 
-Powered by **Gemini 2.5 Flash** and other state-of-the-art language models, Ethereal Intelligence delivers fast, context-aware responses with the ability to dynamically discover and utilize external MCP servers for enhanced functionality.
+## 🧠 Architecture: Brain + Arms
 
-## Key Features
+Our core philosophy separates reasoning from execution to ensure maximum reliability and precision:
 
-### 🎨 Modern Ethereal Interface
+- **Brain (MetaClaw Proxy)**: The reasoning engine. It classifies user intent, identifies the necessary tools, and extracts high-fidelity parameters from the conversation.
+- **Arms (Gemini Flash)**: The execution layer. It receives structured signals from the Brain and performs the actual tool calls—from standard RAG to complex environment mutations.
+- **Orchestrator (FastAPI Backend)**: A high-performance bridge that handles SSE (Server-Sent Events) streaming, session persistence, and proxies requests to LangGraph build services.
 
-- **Refined Design Language**: Deep Purple (#8340FF) and Dark Gray (#201C21) color scheme optimized for professional user experience
-- **Smooth Animations**: Powered by Framer Motion for fluid transitions and interactions
-- **Responsive Layout**: Built with accessibility and usability in mind
+---
 
-### 🤖 Agentic Tool Execution
+## ✨ Key Features
 
-- **Intelligent Agent Loop**: Leverages LangChain to create a sophisticated agentic workflow where the chatbot autonomously reasons about tool usage
-- **Real-Time Tool Discovery**: Dynamically discovers and integrates with external MCP servers
-- **Contextual Tool Selection**: AI-driven decision making for optimal tool utilization based on conversation context
+### 📡 Unified SSE Streaming
 
-### 🔗 Dynamic MCP Integration
+Experience real-time AI responses with zero-latency streaming. The backend handles complex tool-calling handoffs and proxies progress logs directly from build agents to your screen.
 
-- **Seamless Server Registration**: Register MCP Server endpoints directly through the settings interface
-- **Automatic Metadata Detection**: Instantly recognizes available tools and connection status
-- **Extensible Architecture**: Connect to file management systems, databases, external APIs, and custom tool servers
+### 🏗️ Autonomous MCP Builder
 
-### 💬 Smart Conversation Management
+Transform conversations into code. Directly integrated with our [LangChain Backend](https://github.com/your-repo/langchain-app), you can command the AI to build, configure, and initialize new MCP servers in real-time.
 
-- **Persistent Storage**: Automatic conversation history preservation via localStorage
-- **Auto-Archive System**: Intelligent session management that archives inactive conversations after 1 hour of inactivity
-- **Clean Workspace**: Maintains an organized and clutter-free conversation environment
+### 🔌 Federated MCP Interaction
 
-### 🔄 Multi-Provider Support
+Connect to multiple MCP servers simultaneously. The system intelligently switches contexts between local environment tools, cloud APIs, and custom-built servers.
 
-- **Flexible Model Switching**: Seamlessly switch between Google Gemini and Groq (Llama 3, Mixtral) providers
-- **Optimized Performance**: Choose the optimal model for your use case based on cost and performance requirements
-- **Future-Proof Design**: Extensible architecture ready for additional model providers
+### 💎 Premium Interface
 
-## Technology Stack
+A sleek, glassmorphism-inspired UI built with Next.js. Features include:
 
-### Frontend
+- **Persistent Chat History**: Never lose context with our integrated storage.
+- **Status Indicators**: Real-time feedback for tool execution and background tasks.
+- **Dynamic Layouts**: Responsive design that adapts to complex data visualizations and code blocks.
 
-| Component        | Technology                          |
-| ---------------- | ----------------------------------- |
-| Framework        | Next.js 15 (App Router), TypeScript |
-| State Management | Zustand with Persist middleware     |
-| Styling          | Tailwind CSS, Radix UI              |
-| Icons            | Lucide Icons                        |
-| Animations       | Framer Motion                       |
+---
 
-### Backend
+## 🛠️ Technical Stack
 
-| Component        | Technology                       |
-| ---------------- | -------------------------------- |
-| Framework        | FastAPI (Python 3.12+)           |
-| AI Orchestration | LangChain, LangGraph             |
-| MCP Client       | MCP SDK (HTTP/SSE communication) |
-| Supported Models | Gemini 2.5 Flash, Groq API       |
+- **Frontend**: Next.js 15, React 19, TypeScript, Tailwind CSS, Shadcn UI.
+- **Backend**: FastAPI (Python), LangChain, LangGraph SDK.
+- **Services**: Dockerized MongoDB, Gemini API, MetaClaw Gateway.
 
-## Quick Start
+---
+
+## 🚀 Getting Started
 
 ### Prerequisites
 
-- Node.js 18+ and npm
-- Python 3.12+
-- API keys for Gemini and/or Groq (optional)
+- Docker & Docker Compose
+- Gemini API Key ([Get it here](https://aistudio.google.com/app/apikey))
+- MetaClaw Instance (Optional but recommended for "Brain" functionality)
 
-### 1. Environment Configuration
+### Configuration
 
-Create a `.env` file in the project root directory:
+Create a `.env` file in the root directory:
 
 ```bash
-cp .env.example .env
-```
+# 1. Core API
+GEMINI_API_KEY="your_api_key_here"
 
-Configure your environment variables:
+# 2. MetaClaw (Brain) Configuration
+METACLAW_ENABLED=true
+METACLAW_BASE_URL="http://host.docker.internal:30000/v1"
+METACLAW_API_KEY="your_metaclaw_key"
 
-```env
-GEMINI_API_KEY="your_gemini_api_key_here"
-GROQ_API_KEY="your_groq_api_key_here"  # Optional
+# 3. Port Configuration
 NEXT_PUBLIC_BACKEND_PORT=8000
 ```
 
-### 2. Backend Setup
+### Installation (Docker)
 
-Navigate to the backend directory and set up the Python environment:
+```bash
+docker-compose up --build -d
+```
+
+The Frontend will be available at `http://localhost:9002` and the Backend at `http://localhost:8000`.
+
+---
+
+## 🛠️ Development
+
+To run the backend locally:
 
 ```bash
 cd backend
 python -m venv venv
-
-# Activate virtual environment
-# Windows:
-venv\Scripts\activate
-# Unix/Linux:
-source venv/bin/activate
-
-# Install dependencies
+source venv/bin/activate  # or venv\Scripts\activate on Windows
 pip install -r requirements.txt
-
-# Start the backend server
 python main.py
 ```
 
-The backend will be available at `http://localhost:8000`
-
-### 3. Frontend Setup
-
-Install dependencies and start the development server:
+To run the frontend locally:
 
 ```bash
 npm install
 npm run dev
 ```
 
-Access the application at: **`http://localhost:9002`**
-
-### 4. Docker Deployment (Recommended)
-
-For production deployment, use Docker Compose:
-
-```bash
-docker compose up --build -d
-```
-
-This will build and start both frontend and backend containers with proper networking configuration.
-
-## MCP Server Integration
-
-Extend Ethereal Intelligence's capabilities by connecting external MCP Servers:
-
-### Connecting a New MCP Server
-
-1. Navigate to **Settings** in the application
-2. Enter your MCP Server URL (e.g., `http://localhost:5000/mcp`)
-3. The system will automatically discover available tools and display connection status
-
-### Example Use Cases
-
-- **File Management**: Connect to file system servers for reading/writing operations
-- **Database Queries**: Integrate database servers for real-time data retrieval
-- **System Control**: Connect to servers that control external systems or services
-- **Custom APIs**: Integrate any REST API or custom tool server via MCP protocol
-
-### MCP Server Requirements
-
-- Must implement the Model Context Protocol specification
-- Accessible via HTTP or Server-Sent Events (SSE)
-- Properly configured CORS for browser-based connections
-
-## Development
-
-### Project Structure
-
-```
-chatbot_mcp_client/
-├── backend/          # FastAPI backend with LangChain integration
-├── src/              # Next.js frontend application
-│   ├── app/          # Next.js App Router pages
-│   ├── components/   # Reusable UI components
-│   ├── store/        # Zustand state management
-│   └── lib/          # Utility functions and configurations
-├── .env.example      # Environment variable template
-└── docker-compose.yml # Docker orchestration
-```
-
-### Available Scripts
-
-- `npm run dev` - Start frontend development server
-- `npm run build` - Build frontend for production
-- `npm run start` - Start frontend production server
-- `npm run lint` - Run ESLint checks
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Support
-
-For issues, questions, or suggestions:
-
-- Open an issue on GitHub
-- Check the existing documentation
-- Review the discussion forum
-
 ---
 
-<p align="center">
-  <strong>Ethereal Intelligence</strong> — <em>Fluid. Intelligent. Boundless.</em>
-</p>
+## 📄 License
+
+MIT License. See [LICENSE](LICENSE) for details.
