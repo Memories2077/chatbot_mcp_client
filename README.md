@@ -5,7 +5,7 @@
 [![Gemini](https://img.shields.io/badge/Gemini-2.0--Flash-4285F4?logo=google-gemini)](https://aistudio.google.com/)
 [![MetaClaw](https://img.shields.io/badge/MetaClaw-Enabled-blueviolet)](https://github.com/metaclaw)
 
-**Gemini InsightLink** is a premium, full-stack AI platform designed to bridge the gap between human intent and the Model Context Protocol (MCP). It features a sophisticated **"Brain + Arms"** architecture that enables intelligent tool routing, federated MCP server interaction, and autonomous agent building.
+![Ethereal Intelligence Preview](./img/demo.gif)
 
 ---
 
