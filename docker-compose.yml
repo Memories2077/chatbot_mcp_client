@@ -34,6 +34,8 @@ services:
       - mcp-network
     volumes:
       - ./backend:/app/backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   # Frontend Service - Next.js
   frontend:

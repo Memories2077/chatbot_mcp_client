@@ -14,11 +14,9 @@ interface ChatState {
   settings: ChatSettings;
   isLoading: boolean;
   isRightPanelOpen: boolean;
-  isMcpMode: boolean;
   lastActive: number;
   toggleRightPanel: () => void;
   setRightPanelOpen: (open: boolean) => void;
-  toggleMcpMode: () => void;
   sendMessage: (text: string, settings?: ChatSettings) => void;
   setSettings: (settings: Partial<ChatSettings>) => void;
   addMessage: (message: ChatMessage) => void;
@@ -47,14 +45,11 @@ export const useChatStore = create<ChatState>()(
       settings: defaultSettings,
       isLoading: false,
       isRightPanelOpen: false, // Default to closed for better UX
-      isMcpMode: false,
       lastActive: Date.now(),
 
       toggleRightPanel: () =>
         set((state) => ({ isRightPanelOpen: !state.isRightPanelOpen })),
       setRightPanelOpen: (open: boolean) => set({ isRightPanelOpen: open }),
-      
-      toggleMcpMode: () => set((state) => ({ isMcpMode: !state.isMcpMode })),
 
       setSettings: (newSettings) => {
         const currentSettings = get().settings;
@@ -159,24 +154,11 @@ export const useChatStore = create<ChatState>()(
           messages,
           settings: currentSettings,
           currentChatId,
-          isMcpMode,
           persistCurrentChat,
         } = get();
         
         const settings = overrideSettings || currentSettings;
 
-        const formatBotResponse = (content: string) => {
-          if (!content) return content;
-          const trimmed = content.trim();
-          if (trimmed.startsWith('{') && trimmed.includes('"mcpServers"')) {
-            if (!trimmed.includes('```')) {
-              return "```json\n" + trimmed + "\n```";
-            }
-          }
-          return content;
-        };
-
-        
         // Ensure we have a local chat ID
         let chatId = currentChatId;
         if (!chatId) {
@@ -197,164 +179,96 @@ export const useChatStore = create<ChatState>()(
         const updatedMessages = [...messages, userMessage];
         set({ messages: updatedMessages });
 
-        // --- BRANCH 1: Create MCP Server (LangGraph Streaming) ---
-        if (isMcpMode) {
-          try {
-            const client = createLangGraphClient();
-            // Reusing Thread ID if possible
-            let lgThreadId: string | undefined = undefined;
-            try {
-              const existingThreads = await client.threads.search({
-                metadata: { localChatId: chatId },
-                limit: 1,
-              });
-              lgThreadId = existingThreads?.[0]?.thread_id;
-            } catch {}
+        const aiMessageId = uuidv4();
+        // Add placeholder AI message
+        set((state) => ({
+          messages: [...state.messages, {
+            id: aiMessageId,
+            role: "model",
+            content: "",
+            timestamp: new Date().toISOString(),
+          }],
+        }));
 
-            if (!lgThreadId) {
-              const newThread = await client.threads.create({
-                metadata: { localChatId: chatId },
-              });
-              lgThreadId = newThread.thread_id;
-            }
-
-            const aiMessageId = uuidv4();
-            set((state) => ({
-              messages: [...state.messages, {
-                id: aiMessageId,
-                role: "model",
-                content: "",
-                timestamp: new Date().toISOString(),
-              }],
-            }));
-
-            let fullContent = "";
-            let lastLength = 0;
-            let lastMsgId = '';
-            const streamedIds = new Set<string>();
-
-            const stream = client.runs.stream(
-              lgThreadId,
-              ASSISTANT_ID,
-              {
-                input: { messages: [{ role: "user", content: text }] }, // chỉ prompt hiện tại
-                streamMode: "messages",
-                config: { configurable: { model_name: settings.model } }
-              }
-            );
-
-            for await (const chunk of stream) {
-              if (chunk.event === "error") {
-                console.error("LangGraph error:", chunk.data);
-              }
-
-              else if (chunk.event === "messages/partial" && Array.isArray(chunk.data)) {
-                const msgChunk = chunk.data[0];
-                if (typeof msgChunk.content === 'string' && msgChunk.content.length > 0) {
-                  if (msgChunk.id !== lastMsgId) {
-                    lastLength = 0;
-                    lastMsgId = msgChunk.id;
-                  }
-                  streamedIds.add(msgChunk.id);
-                  const newPart = msgChunk.content.substring(lastLength);
-                  lastLength = msgChunk.content.length;
-
-                  if (newPart) {
-                    fullContent += newPart;
-                    set((state) => ({
-                      messages: state.messages.map((m) =>
-                        m.id === aiMessageId ? { ...m, content: fullContent } : m
-                      ),
-                    }));
-                  }
-                }
-              }
-
-              else if (chunk.event === "messages/complete" && Array.isArray(chunk.data)) {
-                const msgChunk = chunk.data[0];
-                if (typeof msgChunk.content === 'string' && !streamedIds.has(msgChunk.id)) {
-                  fullContent += (fullContent ? '\n' : '') + msgChunk.content;
-                  set((state) => ({
-                    messages: state.messages.map((m) =>
-                      m.id === aiMessageId ? { ...m, content: fullContent } : m
-                    ),
-                  }));
-                }
-                lastLength = 0;
-                lastMsgId = '';
-              }
-            }
-
-            persistCurrentChat();
-          } catch (error: any) {
-            console.error("Error calling LangGraph:", error);
-            set((state) => ({
-              messages: [...state.messages, {
-                id: uuidv4(),
-                role: "system",
-                content: error.message || "Failed to connect to Agent service.",
-                timestamp: new Date().toISOString(),
-              }],
-              lastActive: Date.now(),
-            }));
-          } finally {
-            set({ isLoading: false });
-          }
-        }
-        // --- BRANCH 2: Casual Talk (Legacy FastAPI /chat) ---
-        else {
+        try {
           const historyForBackend = updatedMessages.map((msg) => ({
             role: msg.role === "model" ? "model" : "user",
             content: msg.content,
           }));
 
-          try {
-            const response = await fetch(BACKEND_API.chat(), {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                messages: historyForBackend,
-                provider: settings?.provider,
-                model: settings?.model,
-                temperature: settings?.temperature,
-                mcpServers: settings?.mcpServers?.map((s) => s.url) || [],
-              }),
-            });
+          const response = await fetch(BACKEND_API.chat(), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              messages: historyForBackend,
+              provider: settings?.provider,
+              model: settings?.model,
+              temperature: settings?.temperature,
+              mcpServers: settings?.mcpServers?.map((s) => s.url) || [],
+            }),
+          });
 
-            if (!response.ok) {
-              throw new Error(`Backend error: ${response.statusText}`);
-            }
-
-            const data = await response.json();
-
-            const modelMessage: ChatMessage = {
-              id: uuidv4(),
-              role: "model",
-              content: formatBotResponse(data.response),
-              timestamp: new Date().toISOString(),
-            };
-
-            set((state) => ({
-              messages: [...state.messages, modelMessage],
-              lastActive: Date.now(),
-            }));
-
-            persistCurrentChat();
-          } catch (error: any) {
-            console.error("Error calling AI flow:", error);
-            const errorMessage: ChatMessage = {
-              id: uuidv4(),
-              role: "system",
-              content: error.message || "Failed to connect to backend.",
-              timestamp: new Date().toISOString(),
-            };
-            set((state) => ({
-              messages: [...state.messages, errorMessage],
-              lastActive: Date.now(),
-            }));
-          } finally {
-            set({ isLoading: false });
+          if (!response.ok) {
+            throw new Error(`Backend error: ${response.statusText}`);
           }
+
+          if (!response.body) {
+            throw new Error("No response body");
+          }
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let fullContent = "";
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split("\n\n");
+
+            for (const line of lines) {
+              if (line.startsWith("data: ")) {
+                const dataStr = line.replace("data: ", "").trim();
+                
+                if (dataStr === "[DONE]") {
+                  break;
+                }
+
+                try {
+                  const data = JSON.parse(dataStr);
+                  if (data.content) {
+                    fullContent += data.content;
+                    set((state) => ({
+                      messages: state.messages.map((m) =>
+                        m.id === aiMessageId ? { ...m, content: fullContent } : m
+                      ),
+                    }));
+                  } else if (data.error) {
+                    throw new Error(data.error);
+                  }
+                } catch (e) {
+                  // Ignore partial parsing errors if the line is incomplete
+                }
+              }
+            }
+          }
+
+          persistCurrentChat();
+        } catch (error: any) {
+          console.error("Error calling AI flow:", error);
+          const errorMessage: ChatMessage = {
+            id: uuidv4(),
+            role: "system",
+            content: error.message || "Failed to connect to backend.",
+            timestamp: new Date().toISOString(),
+          };
+          set((state) => ({
+            messages: [...state.messages.filter(m => m.id !== aiMessageId), errorMessage],
+            lastActive: Date.now(),
+          }));
+        } finally {
+          set({ isLoading: false });
         }
       },
     }),
@@ -365,7 +279,6 @@ export const useChatStore = create<ChatState>()(
         history: state.history,
         currentChatId: state.currentChatId,
         settings: state.settings,
-        isMcpMode: state.isMcpMode,
         lastActive: state.lastActive,
       }),
       onRehydrateStorage: () => (state) => {

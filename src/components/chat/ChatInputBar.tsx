@@ -7,13 +7,12 @@ import { cn } from "@/lib/utils";
 const contextChips = [
   { icon: "brush", label: "Style Guide" },
   { icon: "image", label: "Reference Images" },
-  { icon: "terminal", label: "Create MCP Server", isToggle: true },
 ];
 
 export function ChatInputBar() {
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { sendMessage, isLoading, isMcpMode, toggleMcpMode } = useChatStore();
+  const { sendMessage, isLoading } = useChatStore();
   const prevLoadingRef = useRef(isLoading);
 
   const handleSend = () => {
@@ -68,7 +67,7 @@ export function ChatInputBar() {
             ref={textareaRef}
             rows={1}
             className="flex-1 bg-transparent border-none focus:outline-none focus:ring-0 text-on-surface placeholder-on-surface-variant/50 text-lg py-3 resize-none no-scrollbar max-h-[200px] leading-relaxed"
-            placeholder={isMcpMode ? "Insert your API Description..." : "Design the future with Ethereal..."}
+            placeholder="Design the future with Ethereal..."
             value={text}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
@@ -93,16 +92,11 @@ export function ChatInputBar() {
         {/* Context Chips */}
         <div className="flex gap-2 mt-4 ml-6 overflow-x-auto pb-2 no-scrollbar font-label">
           {contextChips.map((chip) => {
-            const isSelected = chip.isToggle && isMcpMode;
             return (
               <span
                 key={chip.label}
-                onClick={() => chip.isToggle && toggleMcpMode()}
                 className={cn(
-                  "px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1 cursor-pointer transition-all duration-300 whitespace-nowrap border border-transparent",
-                  isSelected
-                    ? "bg-primary/20 text-primary border-primary/30 shadow-[0_0_15px_rgba(var(--primary-rgb),0.2)]"
-                    : "bg-surface-container-low text-on-surface-variant hover:bg-surface-container"
+                  "px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1 cursor-pointer transition-all duration-300 whitespace-nowrap border border-transparent bg-surface-container-low text-on-surface-variant hover:bg-surface-container"
                 )}
               >
                 <span className="material-symbols-outlined text-[14px]">{chip.icon}</span>
