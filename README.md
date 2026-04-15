@@ -2,7 +2,7 @@
 
 > A next-generation agentic chatbot platform with modern interface and unlimited extensibility through Model Context Protocol (MCP).
 
-![Ethereal Intelligence Preview](img/demo.gif)
+![Ethereal Intelligence Preview](./img/demo.gif)
 
 ## Overview
 
