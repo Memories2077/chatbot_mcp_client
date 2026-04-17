@@ -473,7 +473,6 @@ async def get_mcp_metadata(request: McpMetadataRequest):
 # ------------------------------------------------------------------ #
 # Chat Endpoint                                                        #
 # ------------------------------------------------------------------ #
-
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
     try:
@@ -487,12 +486,9 @@ async def chat_endpoint(request: ChatRequest):
             temperature=request.temperature
         )
 
+        has_tools = not isinstance(agent, BaseLanguageModel)
         last_turn_index = len(request.messages) - 1
-        dynamic_prompt = get_system_prompt(
-            not isinstance(agent, BaseLanguageModel),
-            state.current_mcp_urls,
-            last_turn_index
-        )
+        dynamic_prompt = get_system_prompt(has_tools, state.current_mcp_urls, last_turn_index)
 
         langchain_msgs = [SystemMessage(content=dynamic_prompt)]
         for msg in request.messages:
@@ -503,40 +499,56 @@ async def chat_endpoint(request: ChatRequest):
 
         async def stream_generator():
             try:
-                if hasattr(agent, "astream"):
-                    async for chunk in agent.astream(
-                        langchain_msgs if isinstance(agent, BaseLanguageModel)
-                        else {"messages": langchain_msgs}
-                    ):
-                        # Case A: Pure content chunk
-                        if hasattr(chunk, "content") and chunk.content:
-                            yield f"data: {json.dumps({'content': chunk.content})}\n\n"
-
-                        # Case B: Agent state chunk (LangGraph agents)
-                        elif isinstance(chunk, dict) and "messages" in chunk:
-                            msg = chunk["messages"][-1]
-                            if hasattr(msg, "content") and msg.content:
-                                yield f"data: {json.dumps({'content': msg.content})}\n\n"
-
-                            requirements = _extract_create_mcp_tool_call(msg)
-                            if requirements is not None:
-                                print(f"--- TRIGGERING LANGGRAPH BUILD ---")
-                                print(f"Requirements: {requirements[:100]}...")
-                                async for sse in _stream_langgraph_build(requirements):
-                                    yield sse
-                                return  # Prevent agent from hallucinating after build
-
+                # Gọi LLM/Agent bằng ainvoke (ổn định)
+                if hasattr(agent, "ainvoke"):
+                    if has_tools:
+                        response = await agent.ainvoke({"messages": langchain_msgs})
+                    else:
+                        response = await agent.ainvoke(langchain_msgs)
                 else:
-                    # Fallback for non-streamable agents
-                    response = await agent.ainvoke(
-                        langchain_msgs if isinstance(agent, BaseLanguageModel)
-                        else {"messages": langchain_msgs}
-                    )
-                    content = response.content if hasattr(response, "content") else str(response)
-                    yield f"data: {json.dumps({'content': content})}\n\n"
+                    raise Exception("Agent does not have ainvoke method")
+
+                # Trích xuất nội dung cuối cùng và kiểm tra tool call
+                final_content = ""
+                if isinstance(response, dict) and "messages" in response:
+                    last_msg = response["messages"][-1]
+                    # Kiểm tra tool call create_mcp_server
+                    requirements = _extract_create_mcp_tool_call(last_msg)
+                    if requirements is not None:
+                        print(f"--- TRIGGERING LANGGRAPH BUILD ---")
+                        print(f"Requirements: {requirements[:100]}...")
+                        async for sse in _stream_langgraph_build(requirements):
+                            yield sse
+                        yield "data: [DONE]\n\n"
+                        return
+
+                    # Lấy nội dung text
+                    if hasattr(last_msg, "content"):
+                        final_content = last_msg.content
+                    else:
+                        final_content = str(last_msg)
+                elif hasattr(response, "content"):
+                    final_content = response.content
+                else:
+                    final_content = str(response)
+
+                # Làm sạch nội dung
+                if not isinstance(final_content, str):
+                    if isinstance(final_content, list):
+                        final_content = "\n".join(
+                            [str(b.get("text", b) if isinstance(b, dict) else b) for b in final_content]
+                        )
+                    else:
+                        final_content = json.dumps(final_content, cls=CustomEncoder)
+                final_content = re.sub(r'<think>.*?</think>', '', final_content, flags=re.DOTALL).strip()
+
+                # Gửi toàn bộ nội dung trong một khối duy nhất
+                yield f"data: {json.dumps({'content': final_content})}\n\n"
 
             except Exception as e:
-                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                error_msg = f"Error: {str(e)}"
+                print(error_msg)
+                yield f"data: {json.dumps({'error': error_msg})}\n\n"
             finally:
                 yield "data: [DONE]\n\n"
 
