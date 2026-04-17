@@ -5,7 +5,6 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import { v4 as uuidv4 } from "uuid";
 import type { ChatMessage, ChatSettings, ChatHistoryItem } from "@/lib/types";
 import { BACKEND_API, MODEL_CONFIG } from "@/lib/config";
-import { createLangGraphClient, ASSISTANT_ID } from "@/lib/langgraph";
 
 interface ChatState {
   messages: ChatMessage[];
@@ -180,15 +179,6 @@ export const useChatStore = create<ChatState>()(
         set({ messages: updatedMessages });
 
         const aiMessageId = uuidv4();
-        // Add placeholder AI message
-        set((state) => ({
-          messages: [...state.messages, {
-            id: aiMessageId,
-            role: "model",
-            content: "",
-            timestamp: new Date().toISOString(),
-          }],
-        }));
 
         try {
           const historyForBackend = updatedMessages.map((msg) => ({
@@ -219,6 +209,7 @@ export const useChatStore = create<ChatState>()(
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
           let fullContent = "";
+          let hasAddedAiMessage = false;
 
           while (true) {
             const { done, value } = await reader.read();
@@ -239,11 +230,24 @@ export const useChatStore = create<ChatState>()(
                   const data = JSON.parse(dataStr);
                   if (data.content) {
                     fullContent += data.content;
-                    set((state) => ({
-                      messages: state.messages.map((m) =>
-                        m.id === aiMessageId ? { ...m, content: fullContent } : m
-                      ),
-                    }));
+                    
+                    if (!hasAddedAiMessage) {
+                      set((state) => ({
+                        messages: [...state.messages, {
+                          id: aiMessageId,
+                          role: "model",
+                          content: fullContent,
+                          timestamp: new Date().toISOString(),
+                        }],
+                      }));
+                      hasAddedAiMessage = true;
+                    } else {
+                      set((state) => ({
+                        messages: state.messages.map((m) =>
+                          m.id === aiMessageId ? { ...m, content: fullContent } : m
+                        ),
+                      }));
+                    }
                   } else if (data.error) {
                     throw new Error(data.error);
                   }
