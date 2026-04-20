@@ -129,7 +129,6 @@ def _extract_create_mcp_tool_call(response) -> str | None:
         tool_calls = response.tool_calls
     elif hasattr(response, "additional_kwargs"):
         raw = response.additional_kwargs.get("tool_calls", [])
-        # Normalize provider-specific format: {function: {name, arguments}}
         for tc in raw:
             func = tc.get("function", {}) if isinstance(tc, dict) else {}
             name = func.get("name", "")
@@ -140,7 +139,7 @@ def _extract_create_mcp_tool_call(response) -> str | None:
                 except Exception:
                     args = {}
                 return args.get("requirements", "") if isinstance(args, dict) else ""
-        return None  # No matching tool in additional_kwargs
+        return None
 
     for tc in tool_calls:
         tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "")
@@ -176,16 +175,14 @@ async def _stream_langgraph_build(requirements: str) -> AsyncGenerator[str, None
 
     print(f"Connecting to LangGraph at: {lg_url}")
 
-    # Yield a system message indicating build start
     yield f"data: {json.dumps({'content': chr(10) + chr(10) + '> [SYSTEM]: Building MCP Server...' + chr(10) + chr(10)})}\n\n"
 
     try:
         lg_client = get_client(url=lg_url)
         thread = await lg_client.threads.create()
 
-        # Track partial streaming state per message ID
-        partial_content_lengths = {}  # msg_id -> last length yielded
-        streamed_ids = set()          # msg_ids that have been streamed via partial
+        partial_content_lengths = {}
+        streamed_ids = set()
         last_msg_id = ""
 
         async for lg_chunk in lg_client.runs.stream(
@@ -197,28 +194,23 @@ async def _stream_langgraph_build(requirements: str) -> AsyncGenerator[str, None
             event_type = lg_chunk.event
             data = lg_chunk.data
 
-            # Handle error events
             if event_type == "error":
                 error_content = f"\n\n❌ LANGGRAPH ERROR:\n{json.dumps(data, indent=2)}\n\n"
                 yield f"data: {json.dumps({'content': error_content})}\n\n"
                 continue
 
-            # Handle metadata events (optional: could be logged or ignored)
             if event_type == "metadata":
-                # You can choose to yield metadata if needed, or just log
                 print(f"Metadata: {data}")
                 continue
 
-            # Handle partial message chunks
             if event_type == "messages/partial" and isinstance(data, list):
                 for msg_chunk in data:
                     msg_id = msg_chunk.get("id")
                     content = msg_chunk.get("content", "")
                     if msg_id and isinstance(content, str):
-                        # New message? Reset state
                         if msg_id != last_msg_id:
                             if last_msg_id:
-                                yield f"data: {json.dumps({'content': chr(10)})}\n\n"  # newline between messages
+                                yield f"data: {json.dumps({'content': chr(10)})}\n\n"
                             last_msg_id = msg_id
                             partial_content_lengths[msg_id] = 0
 
@@ -229,20 +221,16 @@ async def _stream_langgraph_build(requirements: str) -> AsyncGenerator[str, None
                             yield f"data: {json.dumps({'content': new_part})}\n\n"
                             partial_content_lengths[msg_id] = len(content)
 
-            # Handle complete messages
             elif event_type == "messages/complete" and isinstance(data, list):
                 for msg_chunk in data:
                     msg_id = msg_chunk.get("id")
                     content = msg_chunk.get("content", "")
                     if msg_id and isinstance(content, str):
                         if msg_id in streamed_ids:
-                            # Already printed via partial, just add newline if needed
                             yield f"data: {json.dumps({'content': chr(10)})}\n\n"
                         else:
-                            # Never streamed (e.g., tool result, system message) → print whole content
                             if content:
                                 yield f"data: {json.dumps({'content': f'{chr(10)}{content}{chr(10)}'})}\n\n"
-                        # Clean up tracking for this message
                         partial_content_lengths.pop(msg_id, None)
                         streamed_ids.discard(msg_id)
                         last_msg_id = ""
@@ -254,55 +242,69 @@ async def _stream_langgraph_build(requirements: str) -> AsyncGenerator[str, None
         err_msg = f"\n\n> [ERROR]: Cannot connect to LangGraph service: {str(lg_err)}\n\n"
         yield f"data: {json.dumps({'content': err_msg})}\n\n"
 
+
 # ------------------------------------------------------------------ #
-# MetaClaw Intent Detection Helpers                                    #
+# MetaClaw Transparent Proxy                                           #
 # ------------------------------------------------------------------ #
 
-_TOOL_INTENT_KEYWORDS = [
-    "create_mcp_server", "build an mcp server", "build a mcp server",
-    "build mcp server", "create an mcp server", "create a mcp server",
-    "create mcp server", "generate mcp server", "generate an mcp server",
-    "i have initiated the build", "i'll build", "i will build",
-    "i'll create", "i will create", "generating the mcp server",
-    "starting the build", "start building", "let me build",
-    "let me create", "tool_calls",
-]
+_METACLAW_INTENT_PROMPT = """You are an intent classifier for an AI assistant system. Your ONLY job is to determine whether the user wants to build an MCP server.
+
+An MCP server build is requested when the user provides:
+- API documentation or guides
+- Technical requirements for building tools/servers
+- Explicit requests to create/build/generate an MCP server
+
+Respond ONLY by either:
+1. Calling the `create_mcp_server` tool with the extracted requirements — if build intent is detected.
+2. Doing absolutely nothing (empty response) — if no build intent is detected.
+
+Do NOT greet, explain, or respond with any text. You are a silent classifier."""
 
 
-def _detect_tool_intent(response, content_text: str) -> dict | None:
+async def _metaclaw_intercept(messages: List[Message], last_turn_index: int) -> dict | None:
     """
-    Analyze MetaClaw's response to detect if it wants to call tools.
-    Returns a dict with type and requirements if intent detected, None otherwise.
-    First checks for structured tool_calls, then falls back to keyword matching.
+    Transparent proxy layer: run MetaClaw as a silent intent classifier.
+    Returns dict with requirements if build intent detected, None otherwise.
+    MetaClaw runs silently — user never sees its output.
     """
-    # Check for structured tool call (covers .tool_calls and .additional_kwargs)
-    requirements = _extract_create_mcp_tool_call(response)
-    if requirements:
-        return {"type": "create_mcp_server", "requirements": requirements}
+    metaclaw_api_key = os.getenv("METACLAW_API_KEY", "metaclaw")
+    metaclaw_base_url = os.getenv("METACLAW_BASE_URL", "http://localhost:30000/v1")
+    metaclaw_model = os.getenv("METACLAW_MODEL", "metaclaw")
 
-    # Fallback: keyword scan of text content
-    lower_content = content_text.lower()
-    for keyword in _TOOL_INTENT_KEYWORDS:
-        if keyword in lower_content:
-            requirements = _extract_requirements_from_text(content_text)
-            return {"type": "create_mcp_server", "requirements": requirements, "detected_from": "text"}
+    # Only send the last few messages to keep it lightweight
+    recent_messages = messages[-3:] if len(messages) > 3 else messages
 
-    return None
+    metaclaw_msgs = [SystemMessage(content=_METACLAW_INTENT_PROMPT)]
+    for msg in recent_messages:
+        if msg.role == "user":
+            metaclaw_msgs.append(HumanMessage(content=msg.content))
+        else:
+            metaclaw_msgs.append(AIMessage(content=msg.content))
 
+    try:
+        metaclaw_llm = ChatOpenAI(
+            model=metaclaw_model,
+            temperature=0.0,  # Always deterministic for classification
+            api_key=metaclaw_api_key,
+            base_url=metaclaw_base_url
+        ).bind_tools([_create_mcp_server_tool()])
 
-def _extract_requirements_from_text(text: str) -> str:
-    """Extract MCP server requirements from MetaClaw's text response."""
-    triggers = [
-        "with the following capabilities:", "includes:",
-        "the server will include:", "capabilities:",
-        "the following tools:", "tools:",
-    ]
-    for trigger in triggers:
-        idx = text.lower().find(trigger.lower())
-        if idx != -1:
-            extracted = text[idx + len(trigger):].strip()
-            return extracted[:500] if extracted else text[:500]
-    return text[:800]
+        response = await metaclaw_llm.ainvoke(metaclaw_msgs)
+        print(f"[MetaClaw Proxy] Intercept completed.")
+
+        # Check for structured tool call
+        requirements = _extract_create_mcp_tool_call(response)
+        if requirements is not None:
+            print(f"[MetaClaw Proxy] Build intent detected. Requirements: {requirements[:100]}...")
+            return {"type": "create_mcp_server", "requirements": requirements}
+
+        print("[MetaClaw Proxy] No build intent — passing through.")
+        return None
+
+    except Exception as e:
+        # If MetaClaw fails, fail open: pass through to provider as normal
+        print(f"[MetaClaw Proxy] Error during intercept (failing open): {e}")
+        return None
 
 
 # ------------------------------------------------------------------ #
@@ -353,14 +355,10 @@ async def get_or_create_agent(provider: str, model_name: str, mcp_urls: List[str
             if not api_key:
                 raise Exception("GROQ_API_KEY not found for Groq provider.")
             llm = ChatGroq(model_name=model_name, temperature=temperature, api_key=api_key)
-        elif provider == "metaclaw":
-            api_key = os.getenv("METACLAW_API_KEY", "metaclaw")
-            base_url = os.getenv("METACLAW_BASE_URL", "http://localhost:30000/v1")
-            llm = ChatOpenAI(model=model_name, temperature=temperature, api_key=api_key, base_url=base_url)
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported provider: {provider}")
 
-    all_tools = [_create_mcp_server_tool()]  # Use cached singleton
+    all_tools = [_create_mcp_server_tool()]
 
     if mcp_urls:
         sessions = []
@@ -407,9 +405,6 @@ def get_system_prompt(has_tools: bool, mcp_urls: List[str], last_turn_index: int
     base = f"""You are a helpful and intelligent AI assistant. 
 The conversation history is provided with [Turn Index] and [Timestamp] for each message. 
 The current message is [Turn {last_turn_index}].
-
-IMPORTANT: You are an autonomous builder assistant. If the user provides an API guide, technical documentation, or any requirements that could be used to build an MCP server, you MUST call the `create_mcp_server` tool immediately in the same turn. 
-DO NOT ask 'Would you like me to build this?' or wait for confirmation—just start the build process automatically.
 
 LANGUAGE: Always respond in the same language the user is using. If the user writes in Vietnamese, respond in Vietnamese. If in English, respond in English. Match their language automatically for every message.
 
@@ -471,14 +466,76 @@ async def get_mcp_metadata(request: McpMetadataRequest):
 
 
 # ------------------------------------------------------------------ #
+# Gemini Executor for MCP Build                                        #
+# ------------------------------------------------------------------ #
+
+async def _execute_build_with_gemini(requirements: str, temperature: float) -> AsyncGenerator[str, None]:
+    """
+    Gemini executor: receives requirements from MetaClaw proxy,
+    calls create_mcp_server tool, then streams the LangGraph build.
+    Falls back to direct LangGraph trigger if Gemini skips the tool call.
+    """
+    gemini_system = """You are an autonomous MCP server builder assistant.
+The system has already determined that an MCP server should be built based on the user's request.
+Your job is to execute this decision by calling the create_mcp_server tool with the provided requirements.
+
+DO NOT ask for permission or confirmation — just execute the build immediately.
+DO NOT respond with text explanations — just trigger the tool and let the system handle progress reporting."""
+
+    gemini_msgs = [
+        SystemMessage(content=gemini_system),
+        HumanMessage(content=f"Build an MCP server with the following requirements:\n\n{requirements}")
+    ]
+
+    try:
+        api_key = os.getenv("GEMINI_API_KEY", "")
+        if not api_key:
+            raise Exception("GEMINI_API_KEY not found.")
+
+        gemini_llm = ChatGoogleGenerativeAI(
+            model="gemini-2.5-flash",
+            temperature=temperature,
+            max_retries=2,
+            api_key=api_key
+        ).bind_tools([_create_mcp_server_tool()])
+
+        gemini_response = await gemini_llm.ainvoke(gemini_msgs)
+        detected_requirements = _extract_create_mcp_tool_call(gemini_response)
+
+        # Use Gemini's extracted requirements if available, else fall back to MetaClaw's
+        build_requirements = detected_requirements if detected_requirements is not None else requirements
+        print(f"[Gemini Executor] Triggering LangGraph build: {build_requirements[:100]}...")
+
+        async for sse in _stream_langgraph_build(build_requirements):
+            yield sse
+
+    except Exception as e:
+        err_msg = f"\n\n> [ERROR]: Gemini executor failed: {str(e)}\n\n"
+        yield f"data: {json.dumps({'content': err_msg})}\n\n"
+
+
+# ------------------------------------------------------------------ #
 # Chat Endpoint                                                        #
 # ------------------------------------------------------------------ #
+
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
     try:
-        if request.provider == "metaclaw":
-            return await _handle_metaclaw_request(request)
+        last_turn_index = len(request.messages) - 1
 
+        # ── Stage 1: MetaClaw transparent proxy intercept ──────────────
+        intent = await _metaclaw_intercept(request.messages, last_turn_index)
+
+        if intent and intent["type"] == "create_mcp_server":
+            # ── Stage 2: Build intent → Gemini executor → LangGraph ────
+            print(f"[Chat] Build intent confirmed — routing to Gemini executor.")
+            async def build_stream():
+                async for sse in _execute_build_with_gemini(intent["requirements"], request.temperature):
+                    yield sse
+                yield "data: [DONE]\n\n"
+            return StreamingResponse(build_stream(), media_type="text/event-stream")
+
+        # ── No build intent → pass through to provider ─────────────────
         agent = await get_or_create_agent(
             provider=request.provider,
             model_name=request.model,
@@ -487,7 +544,6 @@ async def chat_endpoint(request: ChatRequest):
         )
 
         has_tools = not isinstance(agent, BaseLanguageModel)
-        last_turn_index = len(request.messages) - 1
         dynamic_prompt = get_system_prompt(has_tools, state.current_mcp_urls, last_turn_index)
 
         langchain_msgs = [SystemMessage(content=dynamic_prompt)]
@@ -499,7 +555,6 @@ async def chat_endpoint(request: ChatRequest):
 
         async def stream_generator():
             try:
-                # Gọi LLM/Agent bằng ainvoke (ổn định)
                 if hasattr(agent, "ainvoke"):
                     if has_tools:
                         response = await agent.ainvoke({"messages": langchain_msgs})
@@ -508,21 +563,19 @@ async def chat_endpoint(request: ChatRequest):
                 else:
                     raise Exception("Agent does not have ainvoke method")
 
-                # Trích xuất nội dung cuối cùng và kiểm tra tool call
                 final_content = ""
                 if isinstance(response, dict) and "messages" in response:
                     last_msg = response["messages"][-1]
-                    # Kiểm tra tool call create_mcp_server
+
+                    # Safety net: catch if provider agent somehow calls create_mcp_server
                     requirements = _extract_create_mcp_tool_call(last_msg)
                     if requirements is not None:
-                        print(f"--- TRIGGERING LANGGRAPH BUILD ---")
-                        print(f"Requirements: {requirements[:100]}...")
-                        async for sse in _stream_langgraph_build(requirements):
+                        print(f"[Chat] Safety net triggered — provider called create_mcp_server.")
+                        async for sse in _execute_build_with_gemini(requirements, request.temperature):
                             yield sse
                         yield "data: [DONE]\n\n"
                         return
 
-                    # Lấy nội dung text
                     if hasattr(last_msg, "content"):
                         final_content = last_msg.content
                     else:
@@ -532,7 +585,6 @@ async def chat_endpoint(request: ChatRequest):
                 else:
                     final_content = str(response)
 
-                # Làm sạch nội dung
                 if not isinstance(final_content, str):
                     if isinstance(final_content, list):
                         final_content = "\n".join(
@@ -542,7 +594,6 @@ async def chat_endpoint(request: ChatRequest):
                         final_content = json.dumps(final_content, cls=CustomEncoder)
                 final_content = re.sub(r'<think>.*?</think>', '', final_content, flags=re.DOTALL).strip()
 
-                # Gửi toàn bộ nội dung trong một khối duy nhất
                 yield f"data: {json.dumps({'content': final_content})}\n\n"
 
             except Exception as e:
@@ -557,158 +608,6 @@ async def chat_endpoint(request: ChatRequest):
     except Exception as e:
         print(f"Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-# ------------------------------------------------------------------ #
-# MetaClaw Two-Stage Routing                                           #
-# ------------------------------------------------------------------ #
-
-async def _handle_metaclaw_request(request: ChatRequest):
-    """
-    Two-stage routing for MetaClaw:
-    1. Invoke MetaClaw (with tool bound) to get its raw response.
-    2. If tool intent detected → hand off to Gemini for execution.
-       Otherwise → stream MetaClaw's text response directly.
-    """
-    last_turn_index = len(request.messages) - 1
-
-    metaclaw_system = f"""You are a helpful and intelligent AI assistant with deep knowledge of APIs, MCP servers, and tool building.
-The conversation history is provided with [Turn Index] and [Timestamp] for each message.
-The current message is [Turn {last_turn_index}].
-
-IMPORTANT: If the user provides an API guide, technical documentation, or any requirements that could be used to build an MCP server, you should clearly state that you will build it and describe what tools and capabilities the server will have.
-
-LANGUAGE: Always respond in the same language the user is using. If the user writes in Vietnamese, respond in Vietnamese. If in English, respond in English. Match their language automatically for every message.
-"""
-
-    metaclaw_msgs = [SystemMessage(content=metaclaw_system)]
-    for msg in request.messages:
-        if msg.role == "user":
-            metaclaw_msgs.append(HumanMessage(content=msg.content))
-        else:
-            metaclaw_msgs.append(AIMessage(content=msg.content))
-
-    try:
-        api_key = os.getenv("METACLAW_API_KEY", "metaclaw")
-        base_url = os.getenv("METACLAW_BASE_URL", "http://localhost:30000/v1")
-        metaclaw_llm = ChatOpenAI(
-            model=request.model,
-            temperature=request.temperature,
-            api_key=api_key,
-            base_url=base_url
-        ).bind_tools([_create_mcp_server_tool()])
-
-        metaclaw_response = await metaclaw_llm.ainvoke(metaclaw_msgs)
-
-        content_text = ""
-        if hasattr(metaclaw_response, "content"):
-            content_text = metaclaw_response.content or ""
-        elif isinstance(metaclaw_response, dict):
-            content_text = metaclaw_response.get("content", "")
-        else:
-            content_text = str(metaclaw_response)
-
-        print(f"[MetaClaw] Response length: {len(content_text)} chars")
-        print(f"[MetaClaw] Response preview: {content_text[:300]}...")
-
-        intent = _detect_tool_intent(metaclaw_response, content_text)
-
-        if intent:
-            print(f"[MetaClaw] Tool intent detected: {intent['type']}")
-            print(f"[MetaClaw] Requirements: {intent.get('requirements', '')[:200]}...")
-            return await _execute_with_gemini(intent, request, content_text)
-        else:
-            print("[MetaClaw] No tool intent, streaming directly")
-            async def direct_stream():
-                try:
-                    yield f"data: {json.dumps({'content': content_text})}\n\n"
-                except Exception as e:
-                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
-                finally:
-                    yield "data: [DONE]\n\n"
-            return StreamingResponse(direct_stream(), media_type="text/event-stream")
-
-    except Exception as e:
-        error_msg = str(e)
-        print(f"[MetaClaw] Error: {error_msg}")
-        async def error_stream():
-            yield f"data: {json.dumps({'error': f'MetaClaw error: {error_msg}'})}\n\n"
-            yield "data: [DONE]\n\n"
-        return StreamingResponse(error_stream(), media_type="text/event-stream")
-
-
-async def _execute_with_gemini(intent: dict, request: ChatRequest, metaclaw_context: str):
-    """
-    Hand off to Gemini (LLM with tools bound, NOT a full ReAct agent).
-    Gemini calls create_mcp_server → we detect it and stream the LangGraph build.
-    Falls back to direct LangGraph trigger if Gemini skips the tool call.
-    """
-    requirements = intent.get("requirements", "")
-
-    gemini_system = f"""You are an autonomous MCP server builder assistant.
-MetaClaw (the decision-making brain) has already analyzed the user's request and decided that an MCP server should be built.
-Your job is to execute this decision by calling the create_mcp_server tool with the appropriate requirements.
-
-DO NOT ask for permission or confirmation — just execute the build immediately.
-DO NOT respond with text explanations — just trigger the tool and let the system handle progress reporting.
-
-Requirements from MetaClaw's analysis:
-{requirements}
-"""
-
-    gemini_msgs = [SystemMessage(content=gemini_system)]
-    for msg in request.messages:
-        if msg.role == "user":
-            gemini_msgs.append(HumanMessage(content=msg.content))
-        else:
-            gemini_msgs.append(AIMessage(content=msg.content))
-    if metaclaw_context:
-        gemini_msgs.append(AIMessage(content=f"[MetaClaw Analysis]: {metaclaw_context[:500]}"))
-
-    print(f"[Gemini] Executing with {len(gemini_msgs)} messages, requirements: {requirements[:100]}...")
-
-    try:
-        api_key = os.getenv("GEMINI_API_KEY", "")
-        if not api_key:
-            raise Exception("GEMINI_API_KEY not found for Gemini executor.")
-        gemini_agent = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
-            temperature=request.temperature,
-            max_retries=2,
-            api_key=api_key
-        ).bind_tools([_create_mcp_server_tool()])
-    except Exception as e:
-        error_msg = str(e)
-        async def fallback_stream():
-            yield f"data: {json.dumps({'content': f'\\n\\n> [ERROR]: Cannot create Gemini executor: {error_msg}\\n\\n'})}\n\n"
-            yield "data: [DONE]\n\n"
-        return StreamingResponse(fallback_stream(), media_type="text/event-stream")
-
-    async def gemini_stream():
-        try:
-            gemini_response = await gemini_agent.ainvoke(gemini_msgs)
-            print(f"[Gemini] Response type: {type(gemini_response)}")
-
-            detected_requirements = _extract_create_mcp_tool_call(gemini_response)
-
-            if detected_requirements is not None:
-                # Use Gemini's extracted requirements (may be more specific than MetaClaw's)
-                build_requirements = detected_requirements or requirements
-                print(f"[Gemini] TRIGGERING LANGGRAPH BUILD: {build_requirements[:100]}...")
-            else:
-                # Gemini skipped the tool call — use MetaClaw's requirements directly
-                print(f"[Gemini] No tool call found, triggering LangGraph directly with MetaClaw requirements")
-                build_requirements = requirements
-
-            async for sse in _stream_langgraph_build(build_requirements):
-                yield sse
-
-        except Exception as e:
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
-        finally:
-            yield "data: [DONE]\n\n"
-
-    return StreamingResponse(gemini_stream(), media_type="text/event-stream")
 
 
 if __name__ == "__main__":
