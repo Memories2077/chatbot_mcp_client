@@ -1,5 +1,69 @@
 # Project History
 
+## [2026-04-21] Refactoring: Centralized Configuration & MetaClaw Client Wrapper
+
+### Overview
+
+Completed major refactoring to eliminate configuration scattering and improve code maintainability. This addresses critical technical debt where MetaClaw configuration and logic were spread across multiple files and repositories.
+
+### Changes
+
+#### 1. Centralized Configuration Management
+- **Created `backend/config.py`**: New `LLMConfig` dataclass serves as single source of truth for all LLM provider settings
+- **Unified Environment Loading**: All `os.getenv()` calls consolidated into `LLMConfig.from_env()` method
+- **Improved Type Safety**: Configuration now validated through typed fields with sensible defaults
+- **Provider Selection**: Added `get_llm_provider()` and `is_metaclaw_enabled()` helper methods
+
+#### 2. MetaClaw Client Wrapper
+- **Created `backend/metaclaw_client.py`**: Encapsulates all MetaClaw-specific logic into reusable `MetaClawClient` class
+- **Two-Stage Routing**: Handles MetaClaw → Gemini handoff internally, simplifying main.py
+- **Tool Intent Detection**: Moved `_detect_tool_intent()` and `_extract_create_mcp_tool_call()` to wrapper
+- **LangGraph Streaming**: Integrated `_stream_langgraph_build()` using centralized config
+- **Custom Exceptions**: Added `MetaClawError` and `MetaClawDisabledError` for clearer error handling
+
+#### 3. Main Backend Simplification
+- **Removed 150+ lines** of MetaClaw-specific code from `backend/main.py`
+- **Updated `get_or_create_agent()`**: MetaClaw branch now returns `MetaClawClient` instance directly
+- **Updated `chat_endpoint()`**: Added MetaClaw-specific handling but logic is now declarative
+- **Updated `health_check()`**: Uses centralized config instead of scattered `os.getenv()` calls
+- **Removed Duplicate Functions**: Deleted `_handle_metaclaw_request()` and `_execute_with_gemini()` (now in wrapper)
+
+#### 4. Testing & Quality
+- **Created `backend/tests/test_metaclaw_integration.py`**: Comprehensive test suite covering:
+  - Configuration loading and validation
+  - MetaClaw client initialization (success/failure)
+  - Tool call extraction from multiple formats (tool_calls, additional_kwargs)
+  - Intent detection from structured and text responses
+  - Two-stage handoff flow
+  - Fallback behavior when MetaClaw disabled
+  - LangGraph build streaming
+- **Test Fixtures**: Proper environment setup and mock objects for isolated testing
+
+#### 5. Documentation Updates
+- **Updated `chatbot_mcp_client/.env.example`**: Added comprehensive documentation for all config options including MetaClaw, LangGraph, MCP settings
+- **Updated `CLAUDE.md`**: Added references to new `config.py` and `metaclaw_client.py` files; enhanced Configuration section with detailed examples
+- **Updated `mcp-gen/.env.example`**: Added MetaClaw configuration documentation (already implemented in code)
+
+#### 6. mcp-gen Integration (Already Complete)
+- Verified that `mcp-gen/src/utils/genai.ts` already properly uses `metaclawConfig.enabled` to route through MetaClaw proxy
+- Configuration already centralized in `mcp-gen/src/utils/config.ts`
+
+### Benefits
+
+- **Single Source of Truth**: All configuration in one place (`LLMConfig`)
+- **Reduced Duplication**: No more scattered `os.getenv("METACLAW_*")` calls across 4+ files
+- **Easier Testing**: MetaClaw client can be instantiated with mock config for unit tests
+- **Better Maintainability**: MetaClaw logic isolated, making future changes safer
+- **Consistent Behavior**: All modules using `LLMConfig` see identical configuration
+
+### Files Modified/Created
+
+- **Created**: `backend/config.py`, `backend/metaclaw_client.py`, `backend/tests/test_metaclaw_integration.py`
+- **Modified**: `backend/main.py` (net -150 lines), `.env.example`, `CLAUDE.md`
+- **Verified**: `mcp-gen/src/utils/genai.ts` (already correct)
+
+---
+
 ## [2026-04-15] Bug Fix: Gemini Tool Handoff Interception
 
 ### Overview

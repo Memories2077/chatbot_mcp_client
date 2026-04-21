@@ -29,12 +29,11 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, Tool
 from dotenv import load_dotenv
 load_dotenv()
 
-# For local development, read the port from .env and ensure it's a valid integer.
-# This is ignored in Docker, which uses the 'command' from docker-compose.yml.
-try:
-    backend_port = int(os.getenv("NEXT_PUBLIC_BACKEND_PORT", "8000"))
-except (ValueError, TypeError):
-    backend_port = 8000
+# Import centralized configuration
+from .config import config as llm_config
+
+# For local development, read the port from config
+backend_port = llm_config.backend_port
 
 class CustomEncoder(json.JSONEncoder):
     def default(self, o):
@@ -56,6 +55,7 @@ class ChatRequest(BaseModel):
 class AgentState:
     def __init__(self):
         self.agent = None
+        self.metaclaw_client = None  # For MetaClaw client wrapper
         self.exit_stacks = []
         self.current_provider = None
         self.current_model = None
@@ -92,6 +92,7 @@ app.add_middleware(
 # ------------------------------------------------------------------ #
 
 _create_mcp_server_tool_instance = None
+
 
 def _create_mcp_server_tool():
     """Return the create_mcp_server tool, creating it once and caching it."""
@@ -165,11 +166,8 @@ async def _stream_langgraph_build(requirements: str) -> AsyncGenerator[str, None
     messages/complete, metadata, error) and deduplication logic.
     Yields SSE-formatted strings.
     """
-    lg_url = (
-        os.getenv("NEXT_PUBLIC_LANGGRAPH_API_URL")
-        or os.getenv("LANGGRAPH_API_URL")
-        or "http://localhost:2024"
-    )
+    lg_url = llm_config.langgraph_api_url
+
     if "localhost" in lg_url and os.path.exists("/.dockerenv"):
         lg_url = lg_url.replace("localhost", "host.docker.internal")
 
@@ -178,6 +176,7 @@ async def _stream_langgraph_build(requirements: str) -> AsyncGenerator[str, None
     yield f"data: {json.dumps({'content': chr(10) + chr(10) + '> [SYSTEM]: Building MCP Server...' + chr(10) + chr(10)})}\n\n"
 
     try:
+        from langgraph_sdk import get_client
         lg_client = get_client(url=lg_url)
         thread = await lg_client.threads.create()
 
@@ -244,86 +243,22 @@ async def _stream_langgraph_build(requirements: str) -> AsyncGenerator[str, None
 
 
 # ------------------------------------------------------------------ #
-# MetaClaw Transparent Proxy                                           #
-# ------------------------------------------------------------------ #
-
-_METACLAW_INTENT_PROMPT = """You are an intent classifier for an AI assistant system. Your ONLY job is to determine whether the user explicitly wants to BUILD or CREATE an MCP server RIGHT NOW.
-
-Build intent requires BOTH conditions to be true:
-1. The message contains API documentation, technical specs, or server requirements
-2. The user explicitly requests to BUILD, CREATE, or GENERATE something from it
-   (e.g., "build this", "create an MCP server", "generate tools from this", "implement this")
-
-NOT build intent — pass through silently:
-- User is sharing/reading/explaining/remembering API docs without asking to build
-- User asks questions about the API
-- User says "read this", "remember this", "what do you think", "explain this"
-- Casual conversation, even if API docs are present
-
-Respond ONLY by either:
-1. Calling the `create_mcp_server` tool — ONLY if BOTH conditions above are met
-2. Doing absolutely nothing (empty response) — for everything else
-
-You are a silent classifier. When in doubt, do NOT call the tool."""
-
-
-async def _metaclaw_intercept(messages: List[Message], last_turn_index: int) -> dict | None:
-    """
-    Transparent proxy layer: run MetaClaw as a silent intent classifier.
-    Returns dict with requirements if build intent detected, None otherwise.
-    MetaClaw runs silently — user never sees its output.
-    """
-    metaclaw_api_key = os.getenv("METACLAW_API_KEY", "metaclaw")
-    metaclaw_base_url = os.getenv("METACLAW_BASE_URL", "http://localhost:30000/v1")
-    metaclaw_model = os.getenv("METACLAW_MODEL", "metaclaw")
-
-    # Only send the last few messages to keep it lightweight
-    recent_messages = messages[-3:] if len(messages) > 3 else messages
-
-    metaclaw_msgs = [SystemMessage(content=_METACLAW_INTENT_PROMPT)]
-    for msg in recent_messages:
-        if msg.role == "user":
-            metaclaw_msgs.append(HumanMessage(content=msg.content))
-        else:
-            metaclaw_msgs.append(AIMessage(content=msg.content))
-
-    try:
-        metaclaw_llm = ChatOpenAI(
-            model=metaclaw_model,
-            temperature=0.0,  # Always deterministic for classification
-            api_key=metaclaw_api_key,
-            base_url=metaclaw_base_url
-        ).bind_tools([_create_mcp_server_tool()])
-
-        response = await metaclaw_llm.ainvoke(metaclaw_msgs)
-        print(f"[MetaClaw Proxy] Intercept completed.")
-
-        # Check for structured tool call
-        requirements = _extract_create_mcp_tool_call(response)
-        if requirements is not None:
-            print(f"[MetaClaw Proxy] Build intent detected. Requirements: {requirements[:100]}...")
-            return {"type": "create_mcp_server", "requirements": requirements}
-
-        print("[MetaClaw Proxy] No build intent — passing through.")
-        return None
-
-    except Exception as e:
-        # If MetaClaw fails, fail open: pass through to provider as normal
-        print(f"[MetaClaw Proxy] Error during intercept (failing open): {e}")
-        return None
-
-
-# ------------------------------------------------------------------ #
 # Agent Factory                                                        #
 # ------------------------------------------------------------------ #
 
 @app.get("/health")
 async def health_check():
     try:
-        gemini_key = os.getenv("GEMINI_API_KEY")
-        groq_key = os.getenv("GROQ_API_KEY")
-        if not gemini_key and not groq_key:
-            return {"status": "unhealthy", "detail": "No API keys (GEMINI_API_KEY or GROQ_API_KEY) are set."}
+        # Check if at least one provider is configured
+        has_gemini = bool(llm_config.gemini_api_key)
+        has_groq = bool(llm_config.groq_api_key)
+        has_metaclaw = llm_config.metaclaw_enabled and bool(llm_config.metaclaw_api_key)
+
+        if not (has_gemini or has_groq or has_metaclaw):
+            return {
+                "status": "unhealthy",
+                "detail": "No API keys configured. Set GEMINI_API_KEY, GROQ_API_KEY, or METACLAW_ENABLED=true with METACLAW_API_KEY."
+            }
         return {"status": "healthy", "service": "backend"}
     except Exception as e:
         return {"status": "unhealthy", "detail": str(e)}
@@ -351,16 +286,42 @@ async def get_or_create_agent(provider: str, model_name: str, mcp_urls: List[str
         state.exit_stacks = []
         state.agent = None
 
+        # Use centralized config for provider setup
         if provider == "gemini":
-            api_key = os.getenv("GEMINI_API_KEY", "")
+            api_key = llm_config.gemini_api_key
             if not api_key:
                 raise Exception("GEMINI_API_KEY not found for Gemini provider.")
-            llm = ChatGoogleGenerativeAI(model=model_name, temperature=temperature, max_retries=2, api_key=api_key)
+            llm = ChatGoogleGenerativeAI(
+                model=model_name,
+                temperature=temperature,
+                max_retries=2,
+                api_key=api_key
+            )
         elif provider == "groq":
-            api_key = os.getenv("GROQ_API_KEY", "")
+            api_key = llm_config.groq_api_key
             if not api_key:
                 raise Exception("GROQ_API_KEY not found for Groq provider.")
-            llm = ChatGroq(model_name=model_name, temperature=temperature, api_key=api_key)
+            llm = ChatGroq(
+                model_name=model_name,
+                temperature=temperature,
+                api_key=api_key
+            )
+        elif provider == "metaclaw":
+            # Use MetaClaw client wrapper
+            from .metaclaw_client import MetaClawClient, MetaClawDisabledError
+            try:
+                metaclaw_client = MetaClawClient(llm_config)
+                # MetaClaw client returns its own streaming response, not a LangChain agent
+                # Store the client in state for later use
+                state.metaclaw_client = metaclaw_client
+                state.agent = None  # Will be handled differently
+                state.current_provider = provider
+                state.current_model = model_name
+                state.current_mcp_urls = mcp_urls.copy()
+                state.current_temperature = temperature
+                return metaclaw_client  # Return special marker
+            except MetaClawDisabledError:
+                raise Exception("MetaClaw is disabled in configuration")
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported provider: {provider}")
 
@@ -527,27 +488,52 @@ DO NOT respond with text explanations — just trigger the tool and let the syst
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
     try:
-        last_turn_index = len(request.messages) - 1
+        # Special handling for MetaClaw provider
+        if request.provider == "metaclaw":
+            from .metaclaw_client import MetaClawDisabledError
+            try:
+                metaclaw_client = MetaClawClient(llm_config)
+            except MetaClawDisabledError:
+                raise HTTPException(status_code=400, detail="MetaClaw is disabled. Set METACLAW_ENABLED=true to use.")
 
-        # ── Stage 1: MetaClaw transparent proxy intercept ──────────────
-        intent = await _metaclaw_intercept(request.messages, last_turn_index)
+            # Return streaming response directly from MetaClaw client
+            async def metaclaw_stream():
+                try:
+                    async for sse in metaclaw_client.chat(
+                        messages=[{"role": m.role, "content": m.content} for m in request.messages],
+                        temperature=request.temperature,
+                        langgraph_url=llm_config.langgraph_api_url
+                    ):
+                        yield sse
+                except Exception as e:
+                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                    yield "data: [DONE]\n\n"
 
-        if intent and intent["type"] == "create_mcp_server":
-            # ── Stage 2: Build intent → Gemini executor → LangGraph ────
-            print(f"[Chat] Build intent confirmed — routing to Gemini executor.")
-            async def build_stream():
-                async for sse in _execute_build_with_gemini(intent["requirements"], request.temperature):
-                    yield sse
-                yield "data: [DONE]\n\n"
-            return StreamingResponse(build_stream(), media_type="text/event-stream")
+            return StreamingResponse(metaclaw_stream(), media_type="text/event-stream")
 
-        # ── No build intent → pass through to provider ─────────────────
+        # Standard provider flow (Gemini, Groq)
         agent = await get_or_create_agent(
             provider=request.provider,
             model_name=request.model,
             mcp_urls=request.mcpServers,
             temperature=request.temperature
         )
+
+        # Handle MetaClaw client returned from get_or_create_agent
+        from .metaclaw_client import MetaClawClient
+        if isinstance(agent, MetaClawClient):
+            async def metaclaw_stream_from_state():
+                try:
+                    async for sse in agent.chat(
+                        messages=[{"role": m.role, "content": m.content} for m in request.messages],
+                        temperature=request.temperature,
+                        langgraph_url=llm_config.langgraph_api_url
+                    ):
+                        yield sse
+                except Exception as e:
+                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                    yield "data: [DONE]\n\n"
+            return StreamingResponse(metaclaw_stream_from_state(), media_type="text/event-stream")
 
         has_tools = not isinstance(agent, BaseLanguageModel)
         dynamic_prompt = get_system_prompt(has_tools, state.current_mcp_urls, last_turn_index)
@@ -616,6 +602,3 @@ async def chat_endpoint(request: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=backend_port)

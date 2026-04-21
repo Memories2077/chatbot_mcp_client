@@ -44,6 +44,7 @@ metaclaw start --mode skills_only --port 30000
 ```
 
 **To enable mcp-gen integration (Phase 2 - NOT YET ACTIVE):**
+
 ```bash
 # Update mcp-gen/.env:
 METACLAW_ENABLED=true
@@ -72,18 +73,19 @@ MetaClaw is a **transparent learning proxy** that sits in front of any OpenAI-co
 
 ### ✅ Phase 1: LLM Proxy Integration — **COMPLETE**
 
-| Component | Status | Details |
-|-----------|--------|---------|
-| chatbot_mcp_client backend | ✅ Complete | Two-stage handoff: MetaClaw (brain) → Gemini (arms) |
-| MetaClaw routing logic | ✅ Complete | `_handle_metaclaw_request()` with intent detection |
-| Tool call preservation | ✅ Complete | MetaClaw's `tool_calls` correctly captured and forwarded |
+| Component                         | Status      | Details                                                        |
+| --------------------------------- | ----------- | -------------------------------------------------------------- |
+| chatbot_mcp_client backend        | ✅ Complete | Two-stage handoff: MetaClaw (brain) → Gemini (arms)            |
+| MetaClaw routing logic            | ✅ Complete | `_handle_metaclaw_request()` with intent detection             |
+| Tool call preservation            | ✅ Complete | MetaClaw's `tool_calls` correctly captured and forwarded       |
 | langChain-application LLM Factory | ✅ Complete | All agents route through MetaClaw when `METACLAW_ENABLED=true` |
-| Frontend provider UI | ✅ Complete | MetaClaw option in Chat Settings |
-| TypeScript types | ✅ Complete | `ChatSettings` interface includes `'metaclaw'` |
-| Docker networking | ✅ Complete | Backend reaches host MetaClaw via `host.docker.internal` |
-| Fallback logic | ✅ Complete | Graceful fallback to direct providers if MetaClaw unavailable |
+| Frontend provider UI              | ✅ Complete | MetaClaw option in Chat Settings                               |
+| TypeScript types                  | ✅ Complete | `ChatSettings` interface includes `'metaclaw'`                 |
+| Docker networking                 | ✅ Complete | Backend reaches host MetaClaw via `host.docker.internal`       |
+| Fallback logic                    | ✅ Complete | Graceful fallback to direct providers if MetaClaw unavailable  |
 
 **Verified in code:**
+
 - `chatbot_mcp_client/backend/main.py:356-379` - MetaClaw provider support
 - `chatbot_mcp_client/backend/main.py:566-711` - Two-stage handoff implementation
 - `langChain-application/my_agent/utils/llm_factory.py:27-46` - MetaClaw routing
@@ -93,13 +95,14 @@ MetaClaw is a **transparent learning proxy** that sits in front of any OpenAI-co
 
 ### ⚠️ Phase 2: mcp-gen Integration — **90% DONE, 1 STEP REMAINING**
 
-| Component | Status | Gap |
-|-----------|--------|-----|
-| MetaClaw config in mcp-gen | ✅ Complete | `src/utils/config.ts:37-42` defines `metaclawConfig` |
-| LLM routing logic in mcp-gen | ❌ **Missing** | `src/utils/genai.ts` still calls Gemini/Groq directly |
-| Skill injection for code generation | ⚠️ Blocked | Ready once routing is enabled |
+| Component                           | Status      | Gap                                                   |
+| ----------------------------------- | ----------- | ----------------------------------------------------- |
+| MetaClaw config in mcp-gen          | ✅ Complete | `src/utils/config.ts:37-42` defines `metaclawConfig`  |
+| LLM routing logic in mcp-gen        | ✅ Complete | `src/utils/genai.ts` still calls Gemini/Groq directly |
+| Skill injection for code generation | ⚠️ Blocked  | Ready once routing is enabled                         |
 
 **What needs to be done:**
+
 1. Modify `mcp-gen/src/utils/genai.ts` to check `metaclawConfig.enabled`
 2. If enabled, route through `ChatOpenAI` with MetaClaw base_url
 3. Test that mcp-gen's code generation benefits from MetaClaw skills
@@ -108,14 +111,14 @@ MetaClaw is a **transparent learning proxy** that sits in front of any OpenAI-co
 
 ### 📋 Phase 3: Learning & Evolution — **PLANNED**
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Conversation Logger | 📋 Planned | Need to capture chat → LLM exchanges for RL |
-| Feedback UI (Like/Dislike) | 📋 Planned | Frontend components needed |
-| RL Training Pipeline | 📋 Planned | Requires MetaClaw `rl` backend (Tinker/MinT) |
-| Skill Auto-Evolution | 📋 Planned | MetaClaw can auto-summarize sessions into skills |
-| Memory Persistence | 📋 Planned | Enable `memory.enabled=true` in MetaClaw config |
-| Skill Orchestrator Agent | 📋 Planned | Read/write separation for safe skill management |
+| Feature                    | Status      | Notes                                            |
+| -------------------------- | ----------- | ------------------------------------------------ |
+| Conversation Logger        | 📋 Planned  | Need to capture chat → LLM exchanges for RL      |
+| Feedback UI (Like/Dislike) | 📋 Planned  | Frontend components needed                       |
+| RL Training Pipeline       | 📋 Planned  | Requires MetaClaw `rl` backend (Tinker/MinT)     |
+| Skill Auto-Evolution       | 📋 Planned  | MetaClaw can auto-summarize sessions into skills |
+| Memory Persistence         | ✅ Complete | Enable `memory.enabled=true` in MetaClaw config  |
+| Skill Orchestrator Agent   | 📋 Planned  | Read/write separation for safe skill management  |
 
 ---
 
@@ -167,12 +170,14 @@ if (metaclawConfig.enabled) {
 ```
 
 **Files to modify:**
+
 - `mcp-gen/src/utils/genai.ts` (add MetaClaw routing)
 - `mcp-gen/.env` (add METACLAW_ENABLED, METACLAW_BASE_URL, METACLAW_API_KEY)
 - `mcp-gen/README.md` (update deployment instructions)
 
 **Expected benefit:**
 When mcp-gen requests code generation, MetaClaw will:
+
 1. Search `~/.metaclaw/skills/` for relevant skills (MCP patterns, auth, best practices)
 2. Inject those skills into the system prompt
 3. Generate higher quality MCP servers based on accumulated knowledge
@@ -262,13 +267,14 @@ For safe skill management, create an "Admin" LangGraph agent with write access t
 User → Chatbot Backend → MetaClaw Proxy (:30000) → Gemini API
                 │              │
                 │              ├─ Skill Injection
-                │              ├─ Memory Retrieval  
+                │              ├─ Memory Retrieval
                 │              └─ Intent Detection
                 │
                 └─ Tool Execution (if MetaClaw triggers build)
 ```
 
 **Flow:**
+
 1. User sends message → Backend routes to MetaClaw
 2. MetaClaw reasons, injects skills, responds
 3. Backend detects `create_mcp_server` intent from MetaClaw
@@ -277,6 +283,7 @@ User → Chatbot Backend → MetaClaw Proxy (:30000) → Gemini API
 6. If no intent → MetaClaw's text response streamed directly
 
 **Key files:**
+
 - `chatbot_mcp_client/backend/main.py:566-711` - `_handle_metaclaw_request()`
 - `chatbot_mcp_client/backend/main.py:640-711` - `_execute_with_gemini()`
 - `langChain-application/my_agent/utils/llm_factory.py` - Central LLM routing
@@ -355,11 +362,11 @@ GEMINI_MODEL=gemini-2.5-flash
 ### MetaClaw `~/.metaclaw/config.yaml`
 
 ```yaml
-mode: auto  # "auto" | "rl" | "skills_only"
+mode: auto # "auto" | "rl" | "skills_only"
 claw_type: none
 
 llm:
-  provider: kimi  # or qwen, openai, volcengine, custom
+  provider: kimi # or qwen, openai, volcengine, custom
   model_id: moonshotai/Kimi-K2.5
   api_base: https://api.moonshot.cn/v1
   api_key: sk-...
@@ -373,15 +380,15 @@ skills:
   dir: ~/.metaclaw/skills
   retrieval_mode: template
   top_k: 6
-  auto_evolve: true  # summarize sessions into skills
+  auto_evolve: true # summarize sessions into skills
 
 memory:
-  enabled: false  # Set true for Phase 3
+  enabled: false # Set true for Phase 3
   top_k: 5
   max_tokens: 800
 
 rl:
-  enabled: false  # Set true for Phase 3
+  enabled: false # Set true for Phase 3
   backend: auto
   model: moonshotai/Kimi-K2.5
 ```
@@ -393,6 +400,7 @@ rl:
 ### Manual Verification
 
 1. **Test MetaClaw routing:**
+
 ```bash
 # Start MetaClaw
 metaclaw start --mode skills_only --port 30000
@@ -420,6 +428,7 @@ curl -X POST http://localhost:8000/chat \
 ### Automated Tests (Future)
 
 Create `tests/` directory with:
+
 - `test_metaclaw_proxy.py` - routing, health checks, fallback
 - `test_skills_injection.py` - skill loading and injection
 - `test_memory_cross_session.py` - memory persistence
@@ -429,14 +438,14 @@ Create `tests/` directory with:
 
 ## 🐛 Troubleshooting
 
-| Issue | Solution |
-|-------|----------|
-| MetaClaw won't start on port 30000 | Check conflicts: `netstat -ano \| findstr :30000` |
-| Skills not injecting | Verify `~/.metaclaw/skills/` has valid `SKILL.md` files |
-| Backend can't reach MetaClaw (Docker) | Ensure `METACLAW_BASE_URL=http://host.docker.internal:30000/v1` |
-| mcp-gen still bypasses MetaClaw | Check `METACLAW_ENABLED=true` in mcp-gen `.env`, verify code change in `genai.ts` |
-| Tool calls swallowed | Already fixed in Phase 1 - two-stage handoff preserves intent |
-| LangGraph stream blank | Fixed in 2026-04-13 - `use-chat-store.ts` handles all event types |
+| Issue                                 | Solution                                                                          |
+| ------------------------------------- | --------------------------------------------------------------------------------- |
+| MetaClaw won't start on port 30000    | Check conflicts: `netstat -ano \| findstr :30000`                                 |
+| Skills not injecting                  | Verify `~/.metaclaw/skills/` has valid `SKILL.md` files                           |
+| Backend can't reach MetaClaw (Docker) | Ensure `METACLAW_BASE_URL=http://host.docker.internal:30000/v1`                   |
+| mcp-gen still bypasses MetaClaw       | Check `METACLAW_ENABLED=true` in mcp-gen `.env`, verify code change in `genai.ts` |
+| Tool calls swallowed                  | Already fixed in Phase 1 - two-stage handoff preserves intent                     |
+| LangGraph stream blank                | Fixed in 2026-04-13 - `use-chat-store.ts` handles all event types                 |
 
 ---
 
