@@ -287,6 +287,13 @@ export const useChatStore = create<ChatState>()(
       }),
       onRehydrateStorage: () => (state) => {
         if (state) {
+          // Migration: if provider is metaclaw, reset to gemini
+          // Use type casting since 'metaclaw' is no longer in the type definition
+          if ((state.settings?.provider as string) === "metaclaw") {
+            state.settings.provider = "gemini";
+            state.settings.model = MODEL_CONFIG.gemini.defaultModel;
+          }
+
           const now = Date.now();
           if (
             state.messages &&

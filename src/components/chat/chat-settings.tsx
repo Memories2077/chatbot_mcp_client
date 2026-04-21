@@ -30,7 +30,7 @@ interface ChatSettingsProps {
 }
 
 const settingsSchema = z.object({
-  provider: z.enum(['gemini', 'groq', 'metaclaw']),
+  provider: z.enum(['gemini', 'groq']),
   model: z.string(),
   temperature: z.number().min(0).max(1),
   maxTokens: z.number().min(1),
@@ -77,9 +77,7 @@ export function ChatSettings({ settings, setSettings }: ChatSettingsProps) {
   };
 
   const apiKeyName = 
-    provider === 'gemini' ? 'GEMINI_API_KEY' : 
-    provider === 'groq' ? 'GROQ_API_KEY' : 
-    'METACLAW_API_KEY';
+    provider === 'gemini' ? 'GEMINI_API_KEY' : 'GROQ_API_KEY';
 
   return (
     <Sheet open={isOpen} onOpenChange={setIsOpen}>
@@ -114,7 +112,7 @@ export function ChatSettings({ settings, setSettings }: ChatSettingsProps) {
                     <FormItem>
                       <FormLabel>Provider</FormLabel>
                       <Select
-                        onValueChange={(value: 'gemini' | 'groq' | 'metaclaw') => {
+                        onValueChange={(value: 'gemini' | 'groq') => {
                           field.onChange(value);
                           // This leverages the logic in the zustand store to reset the model
                           setSettings({ provider: value });
@@ -129,7 +127,6 @@ export function ChatSettings({ settings, setSettings }: ChatSettingsProps) {
                          <SelectContent>
                           <SelectItem value="gemini">Google Gemini</SelectItem>
                           <SelectItem value="groq">Groq</SelectItem>
-                          <SelectItem value="metaclaw">MetaClaw (Proxy)</SelectItem>
                         </SelectContent>
                       </Select>
                     </FormItem>
