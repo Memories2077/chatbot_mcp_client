@@ -16,6 +16,10 @@ from langchain.tools import tool
 from .config import LLMConfig
 
 
+# Global cache for the core tool instance
+_create_mcp_server_tool_instance = None
+
+
 class MetaClawError(Exception):
     """Base exception for MetaClaw client errors"""
     pass
@@ -35,12 +39,13 @@ class MetaClawClient:
              Otherwise, stream MetaClaw's text response directly
     """
 
-    def __init__(self, config: LLMConfig):
+    def __init__(self, config: LLMConfig, model_name: Optional[str] = None):
         """
         Initialize MetaClaw client.
 
         Args:
             config: LLMConfig instance with MetaClaw settings
+            model_name: Optional override for the MetaClaw model
 
         Raises:
             MetaClawDisabledError: If MetaClaw is not enabled in config
@@ -49,7 +54,7 @@ class MetaClawClient:
         self.enabled = config.metaclaw_enabled
         self.base_url = config.metaclaw_base_url
         self.api_key = config.metaclaw_api_key
-        self.model = config.metaclaw_model
+        self.model = model_name if model_name else config.metaclaw_model
 
         if not self.enabled:
             raise MetaClawDisabledError("MetaClaw is disabled in configuration")
@@ -58,7 +63,7 @@ class MetaClawClient:
         """Create the create_mcp_server tool (singleton pattern)"""
         # Use module-level caching to avoid redefining tool
         global _create_mcp_server_tool_instance
-        if '_create_mcp_server_tool_instance' not in globals():
+        if _create_mcp_server_tool_instance is None:
             @tool
             async def create_mcp_server(requirements: str) -> str:
                 """
@@ -150,13 +155,17 @@ class MetaClawClient:
                 return extracted[:500] if extracted else text[:500]
         return text[:800]
 
-    async def _get_metacaw_llm(self, temperature: float) -> BaseLanguageModel:
+    async def _get_metaclaw_llm(self, temperature: float) -> BaseLanguageModel:
         """Initialize MetaClaw LLM with create_mcp_server tool bound"""
+        base_url = self.base_url
+        if "localhost" in base_url and os.path.exists("/.dockerenv"):
+            base_url = base_url.replace("localhost", "host.docker.internal")
+
         return ChatOpenAI(
             model=self.model,
             temperature=temperature,
             api_key=self.api_key,
-            base_url=self.base_url,
+            base_url=base_url,
             max_retries=2,
         ).bind_tools([self._create_mcp_server_tool()])
 
@@ -283,7 +292,7 @@ LANGUAGE: Always respond in the same language the user is using. If the user wri
 
         try:
             # Stage 1: Invoke MetaClaw
-            metaclaw_llm = await self._get_metacaw_llm(temperature)
+            metaclaw_llm = await self._get_metaclaw_llm(temperature)
             metaclaw_response = await metaclaw_llm.ainvoke(metaclaw_msgs)
 
             content_text = ""
