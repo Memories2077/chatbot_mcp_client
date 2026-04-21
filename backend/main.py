@@ -513,6 +513,7 @@ async def chat_endpoint(request: ChatRequest):
             return StreamingResponse(metaclaw_stream_from_state(), media_type="text/event-stream")
 
         has_tools = not isinstance(agent, BaseLanguageModel)
+        last_turn_index = len(request.messages) - 1
         dynamic_prompt = get_system_prompt(has_tools, state.current_mcp_urls, last_turn_index)
 
         langchain_msgs = [SystemMessage(content=dynamic_prompt)]
