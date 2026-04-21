@@ -1,5 +1,20 @@
 # Project History
 
+## [2026-04-21] Bug Fixes & Integration Polish: MetaClaw Routing & State
+
+### Overview
+Fixed several critical logic errors and integration gaps in the `MetaClawClient` refactoring. These fixes ensure that the MetaClaw provider correctly handles tool execution, respects user-selected models, and works reliably in containerized environments.
+
+### Changes
+- **Fixed `NameError` for Singleton Context**: Defined `_create_mcp_server_tool_instance` at the module level in `metaclaw_client.py` and updated the initialization check to use `is None`.
+- **Docker Container Routing**: Added automatic URL normalization for `metaclaw_base_url` to handle `localhost` to `host.docker.internal` translation when running inside Docker.
+- **State & Cache Consistency**: Refactored `chat_endpoint` in `main.py` to remove redundant MetaClaw-specific logic, ensuring all providers flow through the central `get_or_create_agent` factory for proper state management and caching.
+- **Model Selection Visibility**: Updated `MetaClawClient` to accept and respect an overriding `model_name` from the frontend, allowing users to dynamically switch between Gemini, Llama, or Claude models via the UI.
+- **Typo Corrections**: Renamed `_get_metacaw_llm` to `_get_metaclaw_llm` throughout the codebase.
+- **Files Modified**: `backend/metaclaw_client.py`, `backend/main.py`
+
+---
+
 ## [2026-04-21] Refactoring: Centralized Configuration & MetaClaw Client Wrapper
 
 ### Overview

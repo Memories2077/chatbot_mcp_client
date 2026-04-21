@@ -310,7 +310,7 @@ async def get_or_create_agent(provider: str, model_name: str, mcp_urls: List[str
             # Use MetaClaw client wrapper
             from .metaclaw_client import MetaClawClient, MetaClawDisabledError
             try:
-                metaclaw_client = MetaClawClient(llm_config)
+                metaclaw_client = MetaClawClient(llm_config, model_name=model_name)
                 # MetaClaw client returns its own streaming response, not a LangChain agent
                 # Store the client in state for later use
                 state.metaclaw_client = metaclaw_client
@@ -488,30 +488,7 @@ DO NOT respond with text explanations — just trigger the tool and let the syst
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
     try:
-        # Special handling for MetaClaw provider
-        if request.provider == "metaclaw":
-            from .metaclaw_client import MetaClawDisabledError
-            try:
-                metaclaw_client = MetaClawClient(llm_config)
-            except MetaClawDisabledError:
-                raise HTTPException(status_code=400, detail="MetaClaw is disabled. Set METACLAW_ENABLED=true to use.")
-
-            # Return streaming response directly from MetaClaw client
-            async def metaclaw_stream():
-                try:
-                    async for sse in metaclaw_client.chat(
-                        messages=[{"role": m.role, "content": m.content} for m in request.messages],
-                        temperature=request.temperature,
-                        langgraph_url=llm_config.langgraph_api_url
-                    ):
-                        yield sse
-                except Exception as e:
-                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
-                    yield "data: [DONE]\n\n"
-
-            return StreamingResponse(metaclaw_stream(), media_type="text/event-stream")
-
-        # Standard provider flow (Gemini, Groq)
+        # Standard provider flow (Gemini, Groq, and MetaClaw via wrapper)
         agent = await get_or_create_agent(
             provider=request.provider,
             model_name=request.model,
