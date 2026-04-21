@@ -130,7 +130,6 @@ def _extract_create_mcp_tool_call(response) -> str | None:
         tool_calls = response.tool_calls
     elif hasattr(response, "additional_kwargs"):
         raw = response.additional_kwargs.get("tool_calls", [])
-        # Normalize provider-specific format: {function: {name, arguments}}
         for tc in raw:
             func = tc.get("function", {}) if isinstance(tc, dict) else {}
             name = func.get("name", "")
@@ -141,7 +140,7 @@ def _extract_create_mcp_tool_call(response) -> str | None:
                 except Exception:
                     args = {}
                 return args.get("requirements", "") if isinstance(args, dict) else ""
-        return None  # No matching tool in additional_kwargs
+        return None
 
     for tc in tool_calls:
         tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "")
@@ -174,7 +173,6 @@ async def _stream_langgraph_build(requirements: str) -> AsyncGenerator[str, None
 
     print(f"Connecting to LangGraph at: {lg_url}")
 
-    # Yield a system message indicating build start
     yield f"data: {json.dumps({'content': chr(10) + chr(10) + '> [SYSTEM]: Building MCP Server...' + chr(10) + chr(10)})}\n\n"
 
     try:
@@ -182,9 +180,8 @@ async def _stream_langgraph_build(requirements: str) -> AsyncGenerator[str, None
         lg_client = get_client(url=lg_url)
         thread = await lg_client.threads.create()
 
-        # Track partial streaming state per message ID
-        partial_content_lengths = {}  # msg_id -> last length yielded
-        streamed_ids = set()          # msg_ids that have been streamed via partial
+        partial_content_lengths = {}
+        streamed_ids = set()
         last_msg_id = ""
 
         async for lg_chunk in lg_client.runs.stream(
@@ -196,28 +193,23 @@ async def _stream_langgraph_build(requirements: str) -> AsyncGenerator[str, None
             event_type = lg_chunk.event
             data = lg_chunk.data
 
-            # Handle error events
             if event_type == "error":
                 error_content = f"\n\n❌ LANGGRAPH ERROR:\n{json.dumps(data, indent=2)}\n\n"
                 yield f"data: {json.dumps({'content': error_content})}\n\n"
                 continue
 
-            # Handle metadata events (optional: could be logged or ignored)
             if event_type == "metadata":
-                # You can choose to yield metadata if needed, or just log
                 print(f"Metadata: {data}")
                 continue
 
-            # Handle partial message chunks
             if event_type == "messages/partial" and isinstance(data, list):
                 for msg_chunk in data:
                     msg_id = msg_chunk.get("id")
                     content = msg_chunk.get("content", "")
                     if msg_id and isinstance(content, str):
-                        # New message? Reset state
                         if msg_id != last_msg_id:
                             if last_msg_id:
-                                yield f"data: {json.dumps({'content': chr(10)})}\n\n"  # newline between messages
+                                yield f"data: {json.dumps({'content': chr(10)})}\n\n"
                             last_msg_id = msg_id
                             partial_content_lengths[msg_id] = 0
 
@@ -228,20 +220,16 @@ async def _stream_langgraph_build(requirements: str) -> AsyncGenerator[str, None
                             yield f"data: {json.dumps({'content': new_part})}\n\n"
                             partial_content_lengths[msg_id] = len(content)
 
-            # Handle complete messages
             elif event_type == "messages/complete" and isinstance(data, list):
                 for msg_chunk in data:
                     msg_id = msg_chunk.get("id")
                     content = msg_chunk.get("content", "")
                     if msg_id and isinstance(content, str):
                         if msg_id in streamed_ids:
-                            # Already printed via partial, just add newline if needed
                             yield f"data: {json.dumps({'content': chr(10)})}\n\n"
                         else:
-                            # Never streamed (e.g., tool result, system message) → print whole content
                             if content:
                                 yield f"data: {json.dumps({'content': f'{chr(10)}{content}{chr(10)}'})}\n\n"
-                        # Clean up tracking for this message
                         partial_content_lengths.pop(msg_id, None)
                         streamed_ids.discard(msg_id)
                         last_msg_id = ""
@@ -337,7 +325,7 @@ async def get_or_create_agent(provider: str, model_name: str, mcp_urls: List[str
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported provider: {provider}")
 
-    all_tools = [_create_mcp_server_tool()]  # Use cached singleton
+    all_tools = []
 
     if mcp_urls:
         sessions = []
@@ -384,9 +372,6 @@ def get_system_prompt(has_tools: bool, mcp_urls: List[str], last_turn_index: int
     base = f"""You are a helpful and intelligent AI assistant. 
 The conversation history is provided with [Turn Index] and [Timestamp] for each message. 
 The current message is [Turn {last_turn_index}].
-
-IMPORTANT: You are an autonomous builder assistant. If the user provides an API guide, technical documentation, or any requirements that could be used to build an MCP server, you MUST call the `create_mcp_server` tool immediately in the same turn. 
-DO NOT ask 'Would you like me to build this?' or wait for confirmation—just start the build process automatically.
 
 LANGUAGE: Always respond in the same language the user is using. If the user writes in Vietnamese, respond in Vietnamese. If in English, respond in English. Match their language automatically for every message.
 
@@ -448,8 +433,58 @@ async def get_mcp_metadata(request: McpMetadataRequest):
 
 
 # ------------------------------------------------------------------ #
+# Gemini Executor for MCP Build                                        #
+# ------------------------------------------------------------------ #
+
+async def _execute_build_with_gemini(requirements: str, temperature: float) -> AsyncGenerator[str, None]:
+    """
+    Gemini executor: receives requirements from MetaClaw proxy,
+    calls create_mcp_server tool, then streams the LangGraph build.
+    Falls back to direct LangGraph trigger if Gemini skips the tool call.
+    """
+    gemini_system = """You are an autonomous MCP server builder assistant.
+The system has already determined that an MCP server should be built based on the user's request.
+Your job is to execute this decision by calling the create_mcp_server tool with the provided requirements.
+
+DO NOT ask for permission or confirmation — just execute the build immediately.
+DO NOT respond with text explanations — just trigger the tool and let the system handle progress reporting."""
+
+    gemini_msgs = [
+        SystemMessage(content=gemini_system),
+        HumanMessage(content=f"Build an MCP server with the following requirements:\n\n{requirements}")
+    ]
+
+    try:
+        api_key = os.getenv("GEMINI_API_KEY", "")
+        if not api_key:
+            raise Exception("GEMINI_API_KEY not found.")
+
+        gemini_llm = ChatGoogleGenerativeAI(
+            model="gemini-2.5-flash",
+            temperature=temperature,
+            max_retries=2,
+            api_key=api_key
+        ).bind_tools([_create_mcp_server_tool()])
+
+        gemini_response = await gemini_llm.ainvoke(gemini_msgs)
+        detected_requirements = _extract_create_mcp_tool_call(gemini_response)
+
+        # Use Gemini's extracted requirements if available, else fall back to MetaClaw's
+        build_requirements = detected_requirements if detected_requirements is not None else requirements
+        print(f"[Gemini Executor] Triggering LangGraph build: {build_requirements[:100]}...")
+
+        async for sse in _stream_langgraph_build(build_requirements):
+            yield sse
+
+    except Exception as e:
+        err_msg = f"\n\n> [ERROR]: Gemini executor failed: {str(e)}\n\n"
+        yield f"data: {json.dumps({'content': err_msg})}\n\n"
+
+
+# ------------------------------------------------------------------ #
 # Chat Endpoint                                                        #
 # ------------------------------------------------------------------ #
+
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
     try:
@@ -501,7 +536,6 @@ async def chat_endpoint(request: ChatRequest):
             return StreamingResponse(metaclaw_stream_from_state(), media_type="text/event-stream")
 
         has_tools = not isinstance(agent, BaseLanguageModel)
-        last_turn_index = len(request.messages) - 1
         dynamic_prompt = get_system_prompt(has_tools, state.current_mcp_urls, last_turn_index)
 
         langchain_msgs = [SystemMessage(content=dynamic_prompt)]
@@ -513,7 +547,6 @@ async def chat_endpoint(request: ChatRequest):
 
         async def stream_generator():
             try:
-                # Gọi LLM/Agent bằng ainvoke (ổn định)
                 if hasattr(agent, "ainvoke"):
                     if has_tools:
                         response = await agent.ainvoke({"messages": langchain_msgs})
@@ -522,21 +555,19 @@ async def chat_endpoint(request: ChatRequest):
                 else:
                     raise Exception("Agent does not have ainvoke method")
 
-                # Trích xuất nội dung cuối cùng và kiểm tra tool call
                 final_content = ""
                 if isinstance(response, dict) and "messages" in response:
                     last_msg = response["messages"][-1]
-                    # Kiểm tra tool call create_mcp_server
+
+                    # Safety net: catch if provider agent somehow calls create_mcp_server
                     requirements = _extract_create_mcp_tool_call(last_msg)
                     if requirements is not None:
-                        print(f"--- TRIGGERING LANGGRAPH BUILD ---")
-                        print(f"Requirements: {requirements[:100]}...")
-                        async for sse in _stream_langgraph_build(requirements):
+                        print(f"[Chat] Safety net triggered — provider called create_mcp_server.")
+                        async for sse in _execute_build_with_gemini(requirements, request.temperature):
                             yield sse
                         yield "data: [DONE]\n\n"
                         return
 
-                    # Lấy nội dung text
                     if hasattr(last_msg, "content"):
                         final_content = last_msg.content
                     else:
@@ -546,7 +577,6 @@ async def chat_endpoint(request: ChatRequest):
                 else:
                     final_content = str(response)
 
-                # Làm sạch nội dung
                 if not isinstance(final_content, str):
                     if isinstance(final_content, list):
                         final_content = "\n".join(
@@ -556,7 +586,6 @@ async def chat_endpoint(request: ChatRequest):
                         final_content = json.dumps(final_content, cls=CustomEncoder)
                 final_content = re.sub(r'<think>.*?</think>', '', final_content, flags=re.DOTALL).strip()
 
-                # Gửi toàn bộ nội dung trong một khối duy nhất
                 yield f"data: {json.dumps({'content': final_content})}\n\n"
 
             except Exception as e:
