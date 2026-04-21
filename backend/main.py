@@ -247,18 +247,24 @@ async def _stream_langgraph_build(requirements: str) -> AsyncGenerator[str, None
 # MetaClaw Transparent Proxy                                           #
 # ------------------------------------------------------------------ #
 
-_METACLAW_INTENT_PROMPT = """You are an intent classifier for an AI assistant system. Your ONLY job is to determine whether the user wants to build an MCP server.
+_METACLAW_INTENT_PROMPT = """You are an intent classifier for an AI assistant system. Your ONLY job is to determine whether the user explicitly wants to BUILD or CREATE an MCP server RIGHT NOW.
 
-An MCP server build is requested when the user provides:
-- API documentation or guides
-- Technical requirements for building tools/servers
-- Explicit requests to create/build/generate an MCP server
+Build intent requires BOTH conditions to be true:
+1. The message contains API documentation, technical specs, or server requirements
+2. The user explicitly requests to BUILD, CREATE, or GENERATE something from it
+   (e.g., "build this", "create an MCP server", "generate tools from this", "implement this")
+
+NOT build intent — pass through silently:
+- User is sharing/reading/explaining/remembering API docs without asking to build
+- User asks questions about the API
+- User says "read this", "remember this", "what do you think", "explain this"
+- Casual conversation, even if API docs are present
 
 Respond ONLY by either:
-1. Calling the `create_mcp_server` tool with the extracted requirements — if build intent is detected.
-2. Doing absolutely nothing (empty response) — if no build intent is detected.
+1. Calling the `create_mcp_server` tool — ONLY if BOTH conditions above are met
+2. Doing absolutely nothing (empty response) — for everything else
 
-Do NOT greet, explain, or respond with any text. You are a silent classifier."""
+You are a silent classifier. When in doubt, do NOT call the tool."""
 
 
 async def _metaclaw_intercept(messages: List[Message], last_turn_index: int) -> dict | None:
@@ -358,7 +364,7 @@ async def get_or_create_agent(provider: str, model_name: str, mcp_urls: List[str
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported provider: {provider}")
 
-    all_tools = [_create_mcp_server_tool()]
+    all_tools = []
 
     if mcp_urls:
         sessions = []
