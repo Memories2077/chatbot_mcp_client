@@ -251,49 +251,15 @@ The backend already has full MetaClaw support with two-stage handoff.
 
 ### 2.2 mcp-gen
 
-**Status:** ⚠️ 90% Complete, routing not yet active
+**Status:** ✅ Complete (Phase 2)
 
 **Current state:**
-`mcp-gen/src/utils/genai.ts` currently only supports direct calls to Gemini and Groq. The `metaclawConfig` exists (`src/utils/config.ts:37-42`) but is never used.
+`mcp-gen/src/utils/genai.ts` now supports routing through the MetaClaw proxy when `metaclawConfig.enabled` is true. The `metaclawConfig` is fully utilized.
 
-**Required change:**
-
-Modify `mcp-gen/src/utils/genai.ts` - `genaiCompletion()` function:
-
-```typescript
-import { ChatOpenAI } from "@langchain/openai";
-import { metaclawConfig } from "./config.js";
-
-// Inside genaiCompletion():
-if (metaclawConfig.enabled) {
-  console.log("[GenAI] 🧠 Routing through MetaClaw proxy");
-  llm = new ChatOpenAI({
-    baseUrl: metaclawConfig.baseUrl,
-    apiKey: metaclawConfig.apiKey,
-    model: selectedModel,  // MetaClaw may ignore depending on config
-    temperature: temperature ?? geminiConfig.temperature,
-    maxTokens: maxTokens,
-  });
-} else {
-  // Existing Gemini/Groq logic
-  if (isGroq) {
-    llm = new ChatGroq({ ... });
-  } else {
-    llm = new ChatGoogleGenerativeAI({ ... });
-  }
-}
-```
-
-**Files to modify:**
-- `mcp-gen/src/utils/genai.ts` (add MetaClaw routing logic)
-- `mcp-gen/.env` (add MetaClaw environment variables)
-- `mcp-gen/README.md` (update deployment instructions)
-
-**After completing this change:**
-1. Rebuild mcp-gen Docker container
-2. Set `METACLAW_ENABLED=true` in `.env`
-3. Test with simple MCP server generation request
-4. Verify MetaClaw logs show skill injection for code generation
+**Implementation details:**
+- Added `ChatOpenAI` configuration in `genaiCompletion()` when MetaClaw is enabled.
+- Added MetaClaw environment variables to `.env`.
+- Updated deployment instructions in `mcp-gen/README.md`.
 
 **Expected benefit:**
 When mcp-gen requests code generation, MetaClaw will:
