@@ -134,11 +134,11 @@ User → Chatbot Backend → MetaClaw Proxy (:30000) → Gemini API
 | Feature                    | Status      | Notes                                            |
 | -------------------------- | ----------- | ------------------------------------------------ |
 | Conversation Logger        | 📋 Planned  | Need to capture chat → LLM exchanges for RL      |
-| Feedback UI (Like/Dislike) | 📋 Planned  | Frontend components needed                       |
+| Feedback UI (Like/Dislike) | 📋 Planned  | Frontend + Opinion dialog needed                 |
+| Feedback Storage           | ✅ Defined  | MongoDB `logs` collection in `mcp-gen` stack     |
 | RL Training Pipeline       | 📋 Planned  | Requires MetaClaw `rl` backend (Tinker/MinT)     |
 | Skill Auto-Evolution       | 📋 Planned  | MetaClaw can auto-summarize sessions into skills |
 | Memory Persistence         | ✅ Complete | Enable `memory.enabled=true` in MetaClaw config  |
-| Skill Orchestrator Agent   | 📋 Planned  | Read/write separation for safe skill management  |
 
 ---
 
@@ -373,6 +373,45 @@ memory:
 
 ---
 
+### 3.4 Feedback & Opinion Storage Strategy
+
+To support Phase 3 learning, user feedback (Likes, Dislikes, and Opinions) must be persisted and linked to the generated artifacts.
+
+**Storage Location:**
+Feedback will be saved in the **MongoDB** instance managed by the `mcp-gen` stack.
+
+- **Database:** `docker`
+- **Collection:** `logs` (Existing collection for MCP server metadata)
+
+**Extended Schema for `ServerLogEntry`:**
+
+The existing documents in the `logs` collection will be extended with the following properties:
+
+| Property | Type | Description |
+|---|---|---|
+| `likeCount` | `number` | Total number of likes received |
+| `dislikeCount` | `number` | Total number of dislikes received |
+| `feedbacks` | `Array<FeedbackEntry>` | List of individual user feedback records |
+
+**`FeedbackEntry` Object Structure:**
+
+```typescript
+interface FeedbackEntry {
+  feedbackId: string;      // UUID
+  feedbackType: 'like' | 'dislike';
+  feedbackText: string;    // User's detailed opinion/comment
+  userId: string;          // User who provided the feedback
+  timestamp: Date;         // Time of feedback submission
+}
+```
+
+**Implementation Details:**
+1. **mcp-gen Backend:** Add `POST /api/mcp/:serverId/feedback` to `mcp-server-manager.ts`.
+2. **Atomic Updates:** Use MongoDB `$inc` for counts and `$push` for the `feedbacks` array.
+3. **Frontend:** Implement a feedback dialog that allows users to type their opinion after clicking Like/Dislike.
+
+---
+
 ## ✅ Phase 4: Verification & Testing
 
 ### 4.1 Pre-Verification Checklist
@@ -578,7 +617,8 @@ rl:
 
 4. **📋 Add conversation logging**
    - Implement `ConversationLogger` in chatbot backend
-   - Add `/api/feedback` endpoint
+   - Add `/api/mcp/:serverId/feedback` endpoint to `mcp-gen` manager
+   - Link feedback to MongoDB `logs` collection in `docker` database
    - **Owner:** Backend
 
 5. **📋 Add feedback UI**
@@ -598,10 +638,6 @@ rl:
    - Configure PRM
    - **Owner:** AI Engineer
 
-8. **📋 Implement Skill Orchestrator**
-   - Create validation agent with write access to `~/.metaclaw/skills/`
-   - Bidirectional sync with mcp-gen
-   - **Owner:** AI Engineer
 
 ---
 
