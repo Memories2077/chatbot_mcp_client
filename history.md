@@ -1,5 +1,31 @@
 # Project History
 
+## [2026-04-24] Feature: MongoDB Integration & Feedback Storage Backend
+
+### Overview
+
+Implemented a robust feedback storage system using MongoDB. This integration allows the chatbot to persist chat logs and user feedback (likes/dislikes) in a shared database infrastructure, enabling long-term analytics and service improvement.
+
+### Changes
+
+- **MongoDB Persistence**: Integrated MongoDB as the primary store for chat logs and user feedback. Both `chatbot_mcp_client` and `mcp-gen` now share the same MongoDB instance but use isolated collections (`chat_logs` vs `logs`).
+- **Enhanced Database Layer**: Created `backend/database.py` using `motor` for asynchronous MongoDB operations. Implemented automatic index creation for `messageId` (unique), `serverId`, and `timestamp` to ensure query performance.
+- **Feedback API & Routing**: Developed `backend/feedback_routes.py` providing endpoints to:
+  - Submit likes/dislikes with atomic `$inc` counters.
+  - Store detailed feedback entries with optional `serverId` and `userId` traceability.
+  - Retrieve feedback statistics for specific messages.
+- **Shared Docker Networking**: Updated `docker-compose.yml` to join the `mcp-network`, allowing the backend to communicate with the `mongodb` container in the `mcp-gen` stack using internal DNS.
+- **Configuration & Security**: Added MongoDB connection settings to `backend/config.py` and `.env.example`.
+- **Comprehensive Testing**: Created `test_feedback_backend.py` which validates the entire feedback lifecycle, including health checks, atomic increments, and error handling for non-existent messages.
+- **Documentation**: Authored `docs/MONGODB_INTEGRATION_GUIDE.md` for network topology and setup, and `docs/DAY4_FEEDBACK_BACKEND_COMPLETE.md` for implementation details.
+
+### Files Created/Modified
+
+- **Created**: `backend/database.py`, `backend/feedback_routes.py`, `backend/models.py`, `test_feedback_backend.py`, `docs/MONGODB_INTEGRATION_GUIDE.md`, `docs/DAY4_FEEDBACK_BACKEND_COMPLETE.md`
+- **Modified**: `backend/main.py`, `backend/config.py`, `backend/requirements.txt`, `.env.example`, `docker-compose.yml`, `history.md`
+
+---
+
 ## [2026-04-21] Bug Fixes & Integration Polish: MetaClaw Routing & State
 
 ### Overview

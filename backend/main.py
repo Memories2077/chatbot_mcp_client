@@ -32,6 +32,10 @@ load_dotenv()
 # Import centralized configuration
 from .config import config as llm_config
 
+# Import database and feedback routes
+from . import database
+from . import feedback_routes
+
 # For local development, read the port from config
 backend_port = llm_config.backend_port
 
@@ -67,15 +71,29 @@ state = AgentState()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Startup: Connect to MongoDB
+    try:
+        await database.MongoDB.connect()
+    except Exception as e:
+        print(f"⚠️ Warning: MongoDB connection failed: {e}")
+        # Continue startup even if MongoDB fails - feedback will be unavailable
+
     yield
-    print("\n--- SHUTTING DOWN: Closing all MCP sessions... ---")
+
+    # Shutdown: Close MongoDB and MCP sessions
+    print("\n--- SHUTTING DOWN: Closing connections... ---")
+    try:
+        await database.MongoDB.disconnect()
+    except Exception as e:
+        print(f"Error during MongoDB disconnect: {e}")
+
     for exit_stack in state.exit_stacks:
         try:
             await exit_stack.aclose()
         except Exception:
             pass
     state.exit_stacks = []
-    print("All MCP sessions closed cleanly.")
+    print("All connections closed cleanly.")
 
 app = FastAPI(lifespan=lifespan)
 
@@ -86,6 +104,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Register feedback routes
+app.include_router(feedback_routes.router)
 
 # ------------------------------------------------------------------ #
 # Shared Tool Definition (single source of truth)                      #
