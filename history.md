@@ -1,8 +1,94 @@
 # Project History
 
-## [2026-04-24] Feature: MongoDB Integration & Feedback Storage Backend
+## [2026-04-25] Feature: MCP Server Feedback Implementation
 
 ### Overview
+
+Implemented feedback system for generated MCP servers with like/dislike functionality stored in mcp-gen's MongoDB.
+
+### Architecture Decision
+
+Chose **Option A** (store feedback in mcp-gen) over chatbot backend because:
+- Keeps server metadata together in one place
+- Simpler architecture (no cross-service data sync)
+- mcp-gen already has MongoDB infrastructure
+
+### Changes
+
+#### mcp-gen Integration
+
+- Added `likeCount`, `dislikeCount`, `feedbacks` array to `ServerLogEntry` interface in `src/mcp-server-manager.ts`
+- Created `POST /api/mcp/:serverId/feedback` endpoint with atomic MongoDB updates (`$inc`, `$push`)
+- Enabled CORS middleware for cross-origin requests from chatbot frontend (port 9002)
+- Sanitized `/api/mcp/servers` response to hide sensitive fields (token, containerId, hostPort, etc.)
+
+#### Chatbot Frontend
+
+- Created `src/lib/mcp-server-api.ts` with TypeScript API:
+  - `fetchMcpServers()` - fetches from mcp-gen
+  - `submitMcpServerFeedback()` - sends like/dislike with optional userId, comment
+- Created `src/components/mcp/McpServerFeedbackList.tsx`:
+  - Fetches and displays generated MCP servers
+  - Always-visible like/dislike buttons (counts shown when > 0)
+  - Optimistic UI updates with error rollback
+  - Status badges, creation dates, public URLs
+  - Refresh button and empty state
+- Integrated feedback list into `src/components/layout/RightUtilityPanel.tsx` under "Generated MCP Servers" section
+- Updated `src/lib/types.ts`:
+  - `ActiveMcpServer` (simple: url, name?) for chat settings
+  - `McpServer` (full API response with feedback fields)
+- Fixed `src/components/chat/chat-settings.tsx` zod schema to preserve `name` field
+- Added `NEXT_PUBLIC_MCP_GEN_URL` to `.env.example`
+
+#### Chatbot Backend Cleanup
+
+- Deleted `backend/feedback_routes.py` (incorrect data model for message feedback)
+- Removed MongoDB feedback code from `backend/main.py` (log_message_to_mongodb function and its usage)
+
+### Files Modified/Created
+
+- `mcp-gen/src/mcp-server-manager.ts`
+- `chatbot_mcp_client/backend/main.py` (cleanup)
+- `chatbot_mcp_client/backend/feedback_routes.py` (deleted)
+- `chatbot_mcp_client/src/lib/mcp-server-api.ts` (new)
+- `chatbot_mcp_client/src/components/mcp/McpServerFeedbackList.tsx` (new)
+- `chatbot_mcp_client/src/components/layout/RightUtilityPanel.tsx`
+- `chatbot_mcp_client/src/components/chat/chat-settings.tsx`
+- `chatbot_mcp_client/src/lib/types.ts`
+- `chatbot_mcp_client/.env.example`
+
+### Testing (Manual)
+
+```bash
+# 1. Start mcp-gen stack (Docker)
+cd mcp-gen
+docker-compose up -d  # Port 8080, MongoDB included
+
+# 2. Start chatbot services
+cd ../chatbot_mcp_client
+docker-compose up -d backend  # Port 8000
+npm run dev  # Port 9002
+
+# 3. Generate an MCP server via chat with MetaClaw
+# 4. Open Right Utility Panel (dock icon in header)
+# 5. Verify server appears in "Generated MCP Servers"
+# 6. Click like/dislike - counts should update immediately
+# 7. Check MongoDB in mcp-gen: docker exec -it mongodb mongosh -d docker
+#    > db.logs.find({ serverId: "xxx" }).pretty()
+```
+
+### Success Criteria
+
+- ✅ Feedback endpoint accepts POST requests
+- ✅ Counts increment atomically in MongoDB
+- ✅ Feedback array accumulates entries with userId/comment/timestamp
+- ✅ CORS allows frontend (9002) → mcp-gen (8080)
+- ✅ Optimistic UI updates with rollback on error
+- ✅ No console errors
+
+---
+
+## [2026-04-24] Feature: MongoDB Integration & Feedback Storage Backend
 
 Implemented a robust feedback storage system using MongoDB. This integration allows the chatbot to persist chat logs and user feedback (likes/dislikes) in a shared database infrastructure, enabling long-term analytics and service improvement.
 

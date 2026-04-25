@@ -32,10 +32,6 @@ load_dotenv()
 # Import centralized configuration
 from .config import config as llm_config
 
-# Import database and feedback routes
-from . import database
-from . import feedback_routes
-
 # For local development, read the port from config
 backend_port = llm_config.backend_port
 
@@ -104,9 +100,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Register feedback routes
-app.include_router(feedback_routes.router)
 
 # ------------------------------------------------------------------ #
 # Shared Tool Definition (single source of truth)                      #
