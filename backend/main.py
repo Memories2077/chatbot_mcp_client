@@ -21,7 +21,6 @@ from langchain_core.language_models import BaseLanguageModel
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
-from langchain_openai import ChatOpenAI
 from langchain.tools import tool
 from langgraph_sdk import get_client
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
@@ -502,10 +501,19 @@ DO NOT respond with text explanations — just trigger the tool and let the syst
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
     try:
+        # Determine the effective provider and model based on MetaClaw configuration
+        effective_provider = request.provider
+        effective_model = request.model
+
+        if llm_config.is_metaclaw_enabled():
+            print("[MetaClaw] MetaClaw enabled in config. Forcing provider to 'metaclaw'.")
+            effective_provider = "metaclaw"
+            effective_model = llm_config.metaclaw_model # Use metaclaw's configured model
+
         # Standard provider flow (Gemini, Groq, and MetaClaw via wrapper)
         agent = await get_or_create_agent(
-            provider=request.provider,
-            model_name=request.model,
+            provider=effective_provider,
+            model_name=effective_model,
             mcp_urls=request.mcpServers,
             temperature=request.temperature
         )
