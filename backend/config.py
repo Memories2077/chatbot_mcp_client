@@ -37,6 +37,10 @@ class LLMConfig:
     mcp_connection_timeout: float
     mcp_initialization_timeout: float
 
+    # MongoDB settings
+    mongodb_url: str
+    mongodb_db: str
+
     @classmethod
     def from_env(cls) -> "LLMConfig":
         """Load configuration from environment variables"""
@@ -78,6 +82,10 @@ class LLMConfig:
             # MCP settings
             mcp_connection_timeout=float(os.getenv("MCP_CONNECTION_TIMEOUT", "10.0")),
             mcp_initialization_timeout=float(os.getenv("MCP_INIT_TIMEOUT", "10.0")),
+
+            # MongoDB settings
+            mongodb_url=os.getenv("MONGODB_URL", "mongodb://mongodb:27017"),
+            mongodb_db=os.getenv("MONGODB_DB", "docker"),
         )
 
     def get_llm_provider(self, provider_override: str = None) -> str:

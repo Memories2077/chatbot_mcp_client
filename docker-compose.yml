@@ -15,6 +15,7 @@ services:
       - PYTHONUNBUFFERED=1
       - NEXT_PUBLIC_BACKEND_PORT=${NEXT_PUBLIC_BACKEND_PORT:-8000}
       - NEXT_PUBLIC_LANGGRAPH_API_URL=http://agent-service:2024
+      - MONGODB_URL=mongodb:27017  # Override for Docker: use mcp-gen MongoDB via mcp-network
     ports:
       - "${NEXT_PUBLIC_BACKEND_PORT:-8000}:${NEXT_PUBLIC_BACKEND_PORT:-8000}"
     healthcheck:

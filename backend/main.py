@@ -21,7 +21,6 @@ from langchain_core.language_models import BaseLanguageModel
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
-from langchain_openai import ChatOpenAI
 from langchain.tools import tool
 from langgraph_sdk import get_client
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
@@ -31,6 +30,10 @@ load_dotenv()
 
 # Import centralized configuration
 from .config import config as llm_config
+
+# Import database and feedback routes
+from . import database
+from . import feedback_routes
 
 # For local development, read the port from config
 backend_port = llm_config.backend_port
@@ -67,15 +70,29 @@ state = AgentState()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Startup: Connect to MongoDB
+    try:
+        await database.MongoDB.connect()
+    except Exception as e:
+        print(f"⚠️ Warning: MongoDB connection failed: {e}")
+        # Continue startup even if MongoDB fails - feedback will be unavailable
+
     yield
-    print("\n--- SHUTTING DOWN: Closing all MCP sessions... ---")
+
+    # Shutdown: Close MongoDB and MCP sessions
+    print("\n--- SHUTTING DOWN: Closing connections... ---")
+    try:
+        await database.MongoDB.disconnect()
+    except Exception as e:
+        print(f"Error during MongoDB disconnect: {e}")
+
     for exit_stack in state.exit_stacks:
         try:
             await exit_stack.aclose()
         except Exception:
             pass
     state.exit_stacks = []
-    print("All MCP sessions closed cleanly.")
+    print("All connections closed cleanly.")
 
 app = FastAPI(lifespan=lifespan)
 
@@ -86,6 +103,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Register feedback routes
+app.include_router(feedback_routes.router)
 
 # ------------------------------------------------------------------ #
 # Shared Tool Definition (single source of truth)                      #
@@ -488,10 +508,19 @@ DO NOT respond with text explanations — just trigger the tool and let the syst
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
     try:
+        # Determine the effective provider and model based on MetaClaw configuration
+        effective_provider = request.provider
+        effective_model = request.model
+
+        if llm_config.is_metaclaw_enabled():
+            print("[MetaClaw] MetaClaw enabled in config. Forcing provider to 'metaclaw'.")
+            effective_provider = "metaclaw"
+            effective_model = llm_config.metaclaw_model # Use metaclaw's configured model
+
         # Standard provider flow (Gemini, Groq, and MetaClaw via wrapper)
         agent = await get_or_create_agent(
-            provider=request.provider,
-            model_name=request.model,
+            provider=effective_provider,
+            model_name=effective_model,
             mcp_urls=request.mcpServers,
             temperature=request.temperature
         )
@@ -513,6 +542,7 @@ async def chat_endpoint(request: ChatRequest):
             return StreamingResponse(metaclaw_stream_from_state(), media_type="text/event-stream")
 
         has_tools = not isinstance(agent, BaseLanguageModel)
+        last_turn_index = len(request.messages) - 1
         dynamic_prompt = get_system_prompt(has_tools, state.current_mcp_urls, last_turn_index)
 
         langchain_msgs = [SystemMessage(content=dynamic_prompt)]
