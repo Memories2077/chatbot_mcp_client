@@ -11,6 +11,7 @@ from langchain_core.language_models import BaseLanguageModel
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from langchain.tools import tool
 
 from .config import LLMConfig
@@ -182,6 +183,45 @@ class MetaClawClient:
             api_key=gemini_key,
         ).bind_tools([self._create_mcp_server_tool()])
 
+    async def _get_fallback_llm(self, temperature: float) -> BaseLanguageModel:
+        """
+        Initialize the fallback LLM (Gemini or Groq) for casual chat.
+        Prioritizes Gemini if configured, otherwise Groq.
+        """
+        # Respect llm_config.default_provider first
+        if self.config.default_provider == "gemini" and self.config.gemini_api_key:
+            return ChatGoogleGenerativeAI(
+                model=self.config.gemini_model,
+                temperature=temperature,
+                max_retries=2,
+                api_key=self.config.gemini_api_key
+            )
+        elif self.config.default_provider == "groq" and self.config.groq_api_key:
+            return ChatGroq(
+                model_name=self.config.groq_model,
+                temperature=temperature,
+                api_key=self.config.groq_api_key
+            )
+        else:
+            # Fallback to any available key if default_provider not explicitly set or keys missing
+            if self.config.gemini_api_key:
+                print("[MetaClawClient] Using Gemini for fallback (default provider not explicitly set or invalid).")
+                return ChatGoogleGenerativeAI(
+                    model=self.config.gemini_model,
+                    temperature=temperature,
+                    max_retries=2,
+                    api_key=self.config.gemini_api_key
+                )
+            elif self.config.groq_api_key:
+                print("[MetaClawClient] Using Groq for fallback (default provider not explicitly set or invalid).")
+                return ChatGroq(
+                    model_name=self.config.groq_model,
+                    temperature=temperature,
+                    api_key=self.config.groq_api_key
+                )
+            else:
+                raise MetaClawError("No fallback LLM provider configured (GEMINI_API_KEY or GROQ_API_KEY missing).")
+
     async def _stream_langgraph_build(self, requirements: str, langgraph_url: str) -> AsyncGenerator[str, None]:
         """Stream LangGraph build progress (SSE format)"""
         # Normalize URL for Docker
@@ -314,8 +354,38 @@ LANGUAGE: Always respond in the same language the user is using. If the user wri
                 print(f"[MetaClaw] Requirements: {intent.get('requirements', '')[:200]}...")
                 yield await self._execute_with_gemini(intent, messages, content_text, temperature, langgraph_url)
             else:
-                print("[MetaClaw] No tool intent, streaming directly")
-                yield f"data: {json.dumps({'content': content_text})}\n\n"
+                print(f"[MetaClaw] No tool intent. Feeding MetaClaw's memory-enriched context to fallback provider ({self.config.default_provider}).")
+                
+                # Get the fallback LLM for casual chat
+                fallback_llm = await self._get_fallback_llm(temperature)
+
+                # Prepare messages for the fallback LLM
+                # Use a general system prompt for fallback
+                fallback_system_prompt = f"""You are a helpful and intelligent AI assistant.
+The conversation history is provided with [Turn Index] and [Timestamp] for each message.
+The current message is [Turn {last_turn_index}].
+
+MetaClaw (the intent router) has processed the previous messages and its internal memory,
+and has provided the following additional context/response which you should incorporate
+into your reply, but do NOT directly quote it unless necessary.
+This context is to guide your response and ensure continuity with MetaClaw's memory system.
+
+MetaClaw's Context: {content_text}
+
+LANGUAGE: Always respond in the same language the user is using. If the user writes in Vietnamese, respond in Vietnamese. If in English, respond in English. Match their language automatically for every message.
+"""
+                fallback_messages = [SystemMessage(content=fallback_system_prompt)]
+                for msg in messages:
+                    if msg.get("role") == "user":
+                        fallback_messages.append(HumanMessage(content=msg.get("content", "")))
+                    else:
+                        fallback_messages.append(AIMessage(content=msg.get("content", "")))
+
+                # Stream response from the fallback LLM
+                async for chunk in fallback_llm.astream(fallback_messages):
+                    content = chunk.content
+                    if content:
+                        yield f"data: {json.dumps({'content': content})}\n\n"
                 yield "data: [DONE]\n\n"
 
         except Exception as e:

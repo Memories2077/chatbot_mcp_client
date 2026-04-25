@@ -42,7 +42,7 @@ class MongoDB:
     @classmethod
     async def _create_indexes(cls) -> None:
         """Create indexes for optimal query performance."""
-        logs_collection = cls.db.logs if cls.db else None
+        logs_collection = cls.db.logs if cls.db is not None else None
         if logs_collection is not None:
             try:
                 # Index on messageId for fast feedback lookups (unique for upsert)
