@@ -168,6 +168,8 @@ class MetaClawClient:
             api_key=self.api_key,
             base_url=base_url,
             max_retries=2,
+            top_p=self.config.metaclaw_top_p,
+            max_tokens=self.config.metaclaw_max_tokens,
         ).bind_tools([self._create_mcp_server_tool()])
 
     async def _get_gemini_executor(self, temperature: float) -> BaseLanguageModel:

@@ -24,6 +24,8 @@ class LLMConfig:
     metaclaw_base_url: str
     metaclaw_api_key: str
     metaclaw_model: str
+    metaclaw_top_p: float
+    metaclaw_max_tokens: int
 
     # General settings
     default_temperature: float
@@ -70,6 +72,8 @@ class LLMConfig:
             metaclaw_base_url=os.getenv("METACLAW_BASE_URL", "http://localhost:30000/v1"),
             metaclaw_api_key=os.getenv("METACLAW_API_KEY", "metaclaw"),
             metaclaw_model=os.getenv("METACLAW_MODEL", "gemini-2.5-flash"),
+            metaclaw_top_p=float(os.getenv("METACLAW_TOP_P", "0.5")),
+            metaclaw_max_tokens=int(os.getenv("METACLAW_MAX_TOKENS", "100000")),
 
             # General settings
             default_temperature=float(os.getenv("LLM_TEMPERATURE", "0.0")),
@@ -105,6 +109,8 @@ class LLMConfig:
             "api_key": self.metaclaw_api_key,
             "model": self.metaclaw_model,
             "enabled": self.metaclaw_enabled,
+            "top_p": self.metaclaw_top_p,
+            "max_tokens": self.metaclaw_max_tokens,
         }
 
 
