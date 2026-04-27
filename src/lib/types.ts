@@ -13,9 +13,37 @@ export interface ChatMessage {
   }[];
 }
 
-export interface McpServer {
+// Active MCP server connection (for chat settings)
+export interface ActiveMcpServer {
   url: string;
   name?: string;
+}
+
+// Full MCP server data from mcp-gen API (includes feedback)
+export interface McpServer {
+  serverId: string;
+  status: string;
+  publicUrl: string;
+  createdAt: string;
+  updatedAt?: string;
+  dockerImage?: string;
+  hostPort?: number;
+  containerPort?: number;
+  containerId?: string;
+  buildLogs?: string[];
+  inputContent?: string;
+  action?: string;
+  ragContext?: string;
+  // Feedback fields
+  likeCount: number;
+  dislikeCount: number;
+  feedbacks: Array<{
+    feedbackId: string;
+    type: 'like' | 'dislike';
+    userId?: string;
+    comment?: string;
+    timestamp: string;
+  }>;
 }
 
 export interface ChatSettings {
@@ -23,7 +51,7 @@ export interface ChatSettings {
   model: string;
   temperature: number;
   maxTokens: number;
-  mcpServers: McpServer[];
+  mcpServers: ActiveMcpServer[];
 }
 
 export interface ChatHistoryItem {

@@ -1,4 +1,5 @@
 # Phase 3 Execution Plan - April 30 Deadline
+
 **Status:** READY FOR EXECUTION  
 **Deadline:** April 30, 2026  
 **Days Available:** 7 (April 23-30)  
@@ -9,6 +10,7 @@
 ## 🎯 Context & Constraints
 
 ### Current State (as of April 23)
+
 - ✅ **Phase 1 Complete**: MetaClaw integration working in chatbot backend
 - ✅ **Phase 2 Complete**: mcp-gen routing through MetaClaw (verified in docs)
 - ⚠️ **Critical Gap**: No MCP-specific skills deployed yet
@@ -17,7 +19,9 @@
 - ❌ **Missing**: RL pipeline (Tinker/MinT) - **cannot complete by deadline**
 
 ### Deadline Reality
+
 April 30 is **7 days away**. RL pipeline requires:
+
 - Tinker/MinT infrastructure setup (2-3 days minimum)
 - PRM configuration and testing (1-2 days)
 - Integration with existing system (1-2 days)
@@ -30,16 +34,19 @@ April 30 is **7 days away**. RL pipeline requires:
 ## ✅ Safe Plan: What We CAN Deliver
 
 ### Goal
+
 Deliver a **working, demonstrable system** that shows MetaClaw's learning capability without RL infrastructure.
 
 ### Deliverables (April 30)
+
 1. ✅ MetaClaw fully operational with memory
 2. ✅ 4 MCP-specific skills deployed and tested
-3. ✅ Basic feedback collection (Like/Dislike)
+3. ✅ Basic feedback collection (Like/Dislike) - **COMPLETED EARLY (April 25)**
 4. ✅ Cross-session memory demonstration
 5. ✅ Complete documentation and demo script
 
 ### Deferred to Post-Deadline
+
 - RL training pipeline (Tinker/MinT setup)
 - Opinion dialog with text feedback
 - Advanced skill auto-evolution workflows
@@ -47,15 +54,88 @@ Deliver a **working, demonstrable system** that shows MetaClaw's learning capabi
 
 ---
 
-## 📅 Day-by-Day Execution Plan
+## 🚀 Accelerated Progress
 
-### **Day 1-2 (April 23-24): Bootstrap MCP Skills** ✅ **COMPLETED**
+### **Day 5 (April 25): Feedback System - COMPLETED EARLY**
+
+**Implementation**: MCP Server feedback stored in mcp-gen MongoDB
+
+**Architecture Decision**: Chose **Option A** (store feedback in mcp-gen) over Option B (chatbot backend) because:
+
+- Keeps server metadata together
+- Simpler architecture (no cross-service data sync)
+- mcp-gen already has MongoDB infrastructure
+
+**Changes Implemented**:
+
+1. **mcp-gen** (`mcp-gen/src/mcp-server-manager.ts`):
+   - Added `likeCount`, `dislikeCount`, `feedbacks` array to `ServerLogEntry` interface
+   - Created `POST /api/mcp/:serverId/feedback` endpoint with atomic MongoDB updates (`$inc`, `$push`)
+   - Enabled CORS for chatbot frontend (port 9002)
+   - Sanitized `/api/mcp/servers` response to hide sensitive fields (token, containerId, etc.)
+
+2. **Chatbot Backend Cleanup**:
+   - Removed `feedback_routes.py` (wrong data model - was for message feedback)
+   - Removed MongoDB feedback-related code from `main.py`
+   - Chat endpoint now clean and focused on chat functionality
+
+3. **Frontend Implementation**:
+   - Created `src/lib/mcp-server-api.ts` with `fetchMcpServers()` and `submitMcpServerFeedback()`
+   - Created `src/components/mcp/McpServerFeedbackList.tsx` component:
+     - Fetches servers from mcp-gen
+     - Shows always-visible like/dislike buttons with counts
+     - Optimistic updates with rollback on error
+     - Status badges, dates, URLs
+   - Integrated into `src/components/layout/RightUtilityPanel.tsx` as "Generated MCP Servers" section
+   - Updated TypeScript types:
+     - `ActiveMcpServer` (simple, for chat settings)
+     - `McpServer` (full API response with feedback)
+   - Fixed `chat-settings.tsx` zod schema to preserve `name` field
+
+4. **Configuration**:
+   - Added `NEXT_PUBLIC_MCP_GEN_URL` to `.env.example`
+
+**Testing Instructions** (manual verification needed):
+
+```bash
+# 1. Start mcp-gen stack (Docker)
+cd mcp-gen
+docker-compose up -d  # Runs on port 8080
+
+# 2. Start chatbot services
+cd ../chatbot_mcp_client
+docker-compose up -d backend  # Port 8000
+npm run dev  # Port 9002
+
+# 3. Generate an MCP server via chat
+# 4. Open Right Utility Panel (dock icon in header)
+# 5. Verify server appears in "Generated MCP Servers"
+# 6. Click like/dislike - counts should update immediately
+# 7. Check MongoDB in mcp-gen: `logs` collection should have updated likeCount/dislikeCount
+```
+
+**Files Modified**:
+
+- `mcp-gen/src/mcp-server-manager.ts`
+- `chatbot_mcp_client/backend/main.py` (cleanup)
+- `chatbot_mcp_client/backend/feedback_routes.py` (deleted)
+- `chatbot_mcp_client/src/lib/mcp-server-api.ts` (new)
+- `chatbot_mcp_client/src/components/mcp/McpServerFeedbackList.tsx` (new)
+- `chatbot_mcp_client/src/components/layout/RightUtilityPanel.tsx`
+- `chatbot_mcp_client/src/components/chat/chat-settings.tsx`
+- `chatbot_mcp_client/src/lib/types.ts`
+- `chatbot_mcp_client/.env.example`
+
+---
+
+### **Day 3 (April 25): Foundational MCP Skills** ✅ **COMPLETED**
 
 **Objective**: Create and deploy 4 foundational MCP skills
 
 **Status**: ✅ All 4 skills created and deployed to `~/.metaclaw/skills/`
 
 **Tasks Completed**:
+
 1. ✅ Create skill files in `~/.metaclaw/skills/`:
    - `mcp-server-architecture.md` (106 lines)
    - `mcp-tool-design-patterns.md` (281 lines)
@@ -65,11 +145,13 @@ Deliver a **working, demonstrable system** that shows MetaClaw's learning capabi
 3. ⏳ Testing: Verify skill injection and MetaClaw integration (pending next steps)
 
 **Success Criteria Met**:
+
 - ✅ All 4 skills visible in MetaClaw skills directory
 - ✅ Skills properly categorized and tagged with appropriate metadata
 - ⏳ Skills trigger on relevant questions (to be verified in Day 3+)
 
 **Files Created**:
+
 - `~/.metaclaw/skills/mcp-server-architecture.md`
 - `~/.metaclaw/skills/mcp-tool-design-patterns.md`
 - `~/.metaclaw/skills/mcp-security-best-practices.md`
@@ -77,12 +159,13 @@ Deliver a **working, demonstrable system** that shows MetaClaw's learning capabi
 
 ---
 
-### **Day 3 (April 25): Enable Memory Persistence**
+### **Day 3 (April 25): Enable Memory Persistence** ✅ **COMPLETED**
 
 **Objective**: Enable cross-session learning
 
 **Tasks**:
-1. Update `~/.metaclaw/config.yaml`:
+
+1. ✅ Update `~/.metaclaw/config.yaml`:
    ```yaml
    memory:
      enabled: true
@@ -90,19 +173,21 @@ Deliver a **working, demonstrable system** that shows MetaClaw's learning capabi
      max_tokens: 800
      retrieval_mode: hybrid
    ```
-2. Restart MetaClaw service
-3. Test memory persistence:
+2. ✅ Restart MetaClaw service
+3. ✅ Test memory persistence:
    - Start MetaClaw, ask about MCP servers
    - Stop MetaClaw, restart
    - Ask follow-up question referencing previous context
    - Verify memory persists across restarts
 
 **Success Criteria**:
-- Memory directory populated with storage files
-- Conversations recalled after MetaClaw restart
-- No errors in MetaClaw logs about memory
+
+- ✅ Memory directory populated with storage files
+- ✅ Conversations recalled after MetaClaw restart
+- ✅ No errors in MetaClaw logs about memory
 
 **Files to Modify**:
+
 - `~/.metaclaw/config.yaml`
 
 ---
@@ -112,6 +197,7 @@ Deliver a **working, demonstrable system** that shows MetaClaw's learning capabi
 **Objective**: Store user feedback in MongoDB
 
 **Tasks**:
+
 1. Extend MongoDB `logs` collection schema in `mcp-gen` stack:
    - Add `likeCount: number` (default 0)
    - Add `dislikeCount: number` (default 0)
@@ -123,12 +209,14 @@ Deliver a **working, demonstrable system** that shows MetaClaw's learning capabi
 3. Update `docker-compose.yml` if needed to ensure MongoDB persistence
 
 **Success Criteria**:
+
 - Feedback endpoint accepts POST requests
 - Data correctly stored in MongoDB
 - Counts increment atomically
 - Feedback array accumulates entries
 
 **Files to Modify**:
+
 - `backend/main.py` - add feedback endpoint
 - `docker-compose.yml` - verify MongoDB volume mounts (if needed)
 
@@ -136,33 +224,38 @@ Deliver a **working, demonstrable system** that shows MetaClaw's learning capabi
 
 ### **Day 5 (April 27): Feedback UI (Minimal)**
 
-**Objective**: Add Like/Dislike buttons to chat messages
+**Objective**: Implement an MCP Server list UI with hover-based Like/Dislike feedback buttons
 
 **Tasks**:
-1. Update `ChatMessage` interface in `src/lib/types.ts`:
-   ```typescript
-   interface ChatMessage {
-     // ... existing fields
-     feedback?: 'like' | 'dislike' | null;
-   }
-   ```
-2. Create `ChatMessageFeedback.tsx` component:
-   - Like/Dislike buttons
-   - Visual state (filled when clicked)
-   - Send feedback to `/api/feedback` on click
-3. Integrate into `ChatMessage.tsx` or `ChatLayout.tsx`
-4. Update `useChatStore` to track feedback state locally
+
+1. Create a hidden button to reveal available MCP Servers:
+   - Implement a UI element that is initially hidden or discreet.
+   - When clicked, this button triggers a fetch for available MCP Servers.
+   - Use the `get` command to call `mcp-gen` (../../mcp-gen/) to retrieve the server IDs and details.
+2. Implement MCP Server List UI:
+   - Display each available MCP server as a row in the UI.
+3. Create `McpServerFeedback.tsx` component:
+   - Add Like/Dislike buttons to each MCP server row.
+   - The feedback buttons must be hidden by default.
+   - The buttons should only become visible when the user hovers over the respective MCP server row.
+   - Send feedback to `/api/feedback` on click, including the corresponding MCP server ID.
+4. Update state management to track feedback state for each MCP server locally.
 
 **Success Criteria**:
-- Like/Dislike buttons appear on each message
-- Clicking sends feedback to backend
-- Button state updates immediately (optimistic UI)
-- No console errors
+
+- Hidden button successfully reveals the list of MCP servers when clicked.
+- MCP servers are fetched correctly (via `get` to `mcp gen` to retrieve ID).
+- Like/Dislike buttons are hidden by default and appear on hover over a server row.
+- Clicking sends feedback to the backend associated with the specific server.
+- Button state updates immediately (optimistic UI).
+- No console errors.
 
 **Files to Create/Modify**:
-- `src/components/chat/ChatMessageFeedback.tsx` (new)
-- `src/lib/types.ts` - add feedback field
-- `src/components/chat/chat-message.tsx` or `chat-layout.tsx` - integrate feedback
+
+- `src/components/mcp/McpServerList.tsx` (new)
+- `src/components/mcp/McpServerFeedback.tsx` (new)
+- `src/lib/types.ts` - add feedback field for MCP servers
+- API integration files to support `get` calls to `mcp gen`.
 
 ---
 
@@ -171,6 +264,7 @@ Deliver a **working, demonstrable system** that shows MetaClaw's learning capabi
 **Objective**: Verify end-to-end learning demonstration
 
 **Tasks**:
+
 1. Start all services with MetaClaw enabled
 2. Test full flow:
    - Chat with MetaClaw about MCP → verify skill injection
@@ -184,12 +278,14 @@ Deliver a **working, demonstrable system** that shows MetaClaw's learning capabi
    - Memory recall across sessions
 
 **Success Criteria**:
+
 - All components work together
 - Clear evidence of learning (skill injection + memory)
 - Feedback system operational
 - Demo script ready for presentation
 
 **Files to Create**:
+
 - `docs/PHASE3_DEMO_GUIDE.md` - step-by-step demo
 - `docs/PHASE3_TEST_RESULTS.md` - test outcomes
 
@@ -200,6 +296,7 @@ Deliver a **working, demonstrable system** that shows MetaClaw's learning capabi
 **Objective**: Fix bugs, improve docs, prepare for submission
 
 **Tasks**:
+
 1. Bug fixes from Day 6 testing
 2. Update `METACLAW_INTEGRATION_SYNCED.md` with Phase 3 status
 3. Create `PHASE3_DEPLOYMENT.md` with setup instructions
@@ -207,11 +304,13 @@ Deliver a **working, demonstrable system** that shows MetaClaw's learning capabi
 5. Final integration test
 
 **Success Criteria**:
+
 - No known bugs
 - Documentation complete
 - System demonstrable end-to-end
 
 **Files to Update**:
+
 - `docs/METACLAW_INTEGRATION_SYNCED.md` - mark Phase 3 complete
 - `docs/PHASE3_DEPLOYMENT.md` - new deployment guide
 - `README.md` - update if needed
@@ -223,6 +322,7 @@ Deliver a **working, demonstrable system** that shows MetaClaw's learning capabi
 **Objective**: Deliver working system
 
 **Tasks**:
+
 1. Final health check
 2. Run demo script
 3. Package documentation
@@ -307,6 +407,7 @@ Existing `logs` collection documents will have:
 ## 🧪 Verification Checklist
 
 ### Pre-Deadline (April 29)
+
 - [ ] MetaClaw running with `memory.enabled=true`
 - [ ] 4 MCP skills deployed in `~/.metaclaw/skills/`
 - [ ] Skills trigger on relevant questions
@@ -319,6 +420,7 @@ Existing `logs` collection documents will have:
 - [ ] Backend starting without errors
 
 ### Demo Readiness (April 30)
+
 - [ ] Demo script executed successfully
 - [ ] Screenshots/videos captured
 - [ ] Documentation complete
@@ -329,15 +431,16 @@ Existing `logs` collection documents will have:
 
 ## 🚨 Risk Mitigation
 
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| MetaClaw memory bugs | High | Test thoroughly on Day 6; if unstable, disable and document |
-| MongoDB connection issues | High | Verify docker-compose volumes; test early |
-| Frontend TypeScript errors | Medium | Build frequently; use `npm run typecheck` |
-| Skills not triggering | Medium | Test each skill individually; adjust descriptions |
-| Feedback lost on restart | Medium | Verify MongoDB persistence; test restart scenarios |
+| Risk                       | Impact | Mitigation                                                  |
+| -------------------------- | ------ | ----------------------------------------------------------- |
+| MetaClaw memory bugs       | High   | Test thoroughly on Day 6; if unstable, disable and document |
+| MongoDB connection issues  | High   | Verify docker-compose volumes; test early                   |
+| Frontend TypeScript errors | Medium | Build frequently; use `npm run typecheck`                   |
+| Skills not triggering      | Medium | Test each skill individually; adjust descriptions           |
+| Feedback lost on restart   | Medium | Verify MongoDB persistence; test restart scenarios          |
 
 **If something breaks:**
+
 1. Document the issue
 2. Implement fallback (e.g., disable feature)
 3. Continue with remaining tasks
@@ -348,18 +451,21 @@ Existing `logs` collection documents will have:
 ## 📊 Success Metrics
 
 ### Minimum Viable Success (Pass)
+
 - MetaClaw operational with memory
 - 2+ MCP skills triggering correctly
 - Feedback collection working
 - Demo script executes without errors
 
 ### Target Success (Good)
+
 - All 4 MCP skills working
 - Cross-session memory demonstrated
 - Feedback UI polished
 - Complete documentation
 
 ### Stretch Success (Excellent)
+
 - All targets + no known bugs + video demo
 
 ---
@@ -367,12 +473,14 @@ Existing `logs` collection documents will have:
 ## 🔄 Post-Deadline Roadmap (For Reference)
 
 ### Week 1-2 (May 1-14)
+
 - Set up Tinker/MinT RL backend
 - Configure PRM (Preference Reward Model)
 - Enable `rl.enabled=true` in MetaClaw
 - Connect feedback data to RL training
 
 ### Week 3-4 (May 15-31)
+
 - Test RL training loop
 - Implement opinion dialog UI
 - Add feedback-to-skill evolution

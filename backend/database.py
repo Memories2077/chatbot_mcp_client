@@ -6,7 +6,7 @@ Provides async MongoDB client using motor.
 import asyncio
 from typing import Optional
 from motor.motor_asyncio import AsyncIOMotorClient
-from .config import config
+from config import config
 
 
 class MongoDB:
@@ -45,8 +45,28 @@ class MongoDB:
         logs_collection = cls.db.logs if cls.db is not None else None
         if logs_collection is not None:
             try:
+                # First, check for and handle documents with null/missing messageId
+                # These would violate the unique index constraint
+                duplicate_check = await logs_collection.count_documents({
+                    "$or": [
+                        {"messageId": None},
+                        {"messageId": {"$exists": False}}
+                    ]
+                })
+
+                if duplicate_check > 0:
+                    print(f"⚠️ Found {duplicate_check} documents with null/missing messageId in logs collection")
+                    print("   These documents will be excluded from the unique index (sparse index)")
+
                 # Index on messageId for fast feedback lookups (unique for upsert)
-                await logs_collection.create_index("messageId", unique=True)
+                # Use sparse index to only include documents where messageId exists and is not null.
+                # Sparse indexes automatically exclude documents with missing or null field values.
+                await logs_collection.create_index(
+                    "messageId",
+                    unique=True,
+                    sparse=True
+                )
+
                 # Index on serverId for filtering feedback by MCP server
                 await logs_collection.create_index("serverId")
                 # Index on timestamp for potential sorting/analytics
@@ -80,6 +100,6 @@ class MongoDB:
 
 # Convenience function to get logs collection
 async def get_logs_collection():
-    """Get the chat logs collection with proper initialization."""
+    """Get the logs collection with proper initialization."""
     await MongoDB.connect()
-    return MongoDB.get_collection("chat_logs")
+    return MongoDB.get_collection("logs")
