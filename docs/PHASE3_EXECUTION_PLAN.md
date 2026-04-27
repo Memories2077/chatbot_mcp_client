@@ -128,7 +128,7 @@ npm run dev  # Port 9002
 
 ---
 
-### **Day 3 (April 25): Enable Memory Persistence** ⏳ **IN PROGRESS**
+### **Day 3 (April 25): Foundational MCP Skills** ✅ **COMPLETED**
 
 **Objective**: Create and deploy 4 foundational MCP skills
 
@@ -159,13 +159,13 @@ npm run dev  # Port 9002
 
 ---
 
-### **Day 3 (April 25): Enable Memory Persistence**
+### **Day 3 (April 25): Enable Memory Persistence** ✅ **COMPLETED**
 
 **Objective**: Enable cross-session learning
 
 **Tasks**:
 
-1. Update `~/.metaclaw/config.yaml`:
+1. ✅ Update `~/.metaclaw/config.yaml`:
    ```yaml
    memory:
      enabled: true
@@ -173,8 +173,8 @@ npm run dev  # Port 9002
      max_tokens: 800
      retrieval_mode: hybrid
    ```
-2. Restart MetaClaw service
-3. Test memory persistence:
+2. ✅ Restart MetaClaw service
+3. ✅ Test memory persistence:
    - Start MetaClaw, ask about MCP servers
    - Stop MetaClaw, restart
    - Ask follow-up question referencing previous context
@@ -182,9 +182,9 @@ npm run dev  # Port 9002
 
 **Success Criteria**:
 
-- Memory directory populated with storage files
-- Conversations recalled after MetaClaw restart
-- No errors in MetaClaw logs about memory
+- ✅ Memory directory populated with storage files
+- ✅ Conversations recalled after MetaClaw restart
+- ✅ No errors in MetaClaw logs about memory
 
 **Files to Modify**:
 

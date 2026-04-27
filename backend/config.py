@@ -71,7 +71,7 @@ class LLMConfig:
             metaclaw_enabled=os.getenv("METACLAW_ENABLED", "false").lower() == "true",
             metaclaw_base_url=os.getenv("METACLAW_BASE_URL", "http://localhost:30000/v1"),
             metaclaw_api_key=os.getenv("METACLAW_API_KEY", "metaclaw"),
-            metaclaw_model=os.getenv("METACLAW_MODEL", "gemini-2.5-flash"),
+            metaclaw_model=os.getenv("METACLAW_MODEL", "qwen/qwen3-next-80b-a3b-instruct"),
             metaclaw_top_p=float(os.getenv("METACLAW_TOP_P", "0.5")),
             metaclaw_max_tokens=int(os.getenv("METACLAW_MAX_TOKENS", "100000")),
 

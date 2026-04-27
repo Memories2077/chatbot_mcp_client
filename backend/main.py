@@ -29,7 +29,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import centralized configuration
-from .config import config as llm_config
+from config import config as llm_config
+import database
 
 # For local development, read the port from config
 backend_port = llm_config.backend_port
@@ -321,7 +322,7 @@ async def get_or_create_agent(provider: str, model_name: str, mcp_urls: List[str
             )
         elif provider == "metaclaw":
             # Use MetaClaw client wrapper
-            from .metaclaw_client import MetaClawClient, MetaClawDisabledError
+            from metaclaw_client import MetaClawClient, MetaClawDisabledError
             try:
                 metaclaw_client = MetaClawClient(llm_config, model_name=model_name)
                 # MetaClaw client returns its own streaming response, not a LangChain agent
@@ -519,7 +520,7 @@ async def chat_endpoint(request: ChatRequest):
         )
 
         # Handle MetaClaw client returned from get_or_create_agent
-        from .metaclaw_client import MetaClawClient
+        from metaclaw_client import MetaClawClient
         if isinstance(agent, MetaClawClient):
             async def metaclaw_stream_from_state():
                 try:

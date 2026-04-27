@@ -14,7 +14,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 from langchain.tools import tool
 
-from .config import LLMConfig
+from config import LLMConfig
 
 
 # Global cache for the core tool instance
@@ -156,11 +156,14 @@ class MetaClawClient:
                 return extracted[:500] if extracted else text[:500]
         return text[:800]
 
-    async def _get_metaclaw_llm(self, temperature: float) -> BaseLanguageModel:
+    async def _get_metaclaw_llm(self, temperature: float, session_done: bool = False) -> BaseLanguageModel:
         """Initialize MetaClaw LLM with create_mcp_server tool bound"""
         base_url = self.base_url
         if "localhost" in base_url and os.path.exists("/.dockerenv"):
             base_url = base_url.replace("localhost", "host.docker.internal")
+
+        # Prepare custom headers for session_done (MetaClaw-specific, not standard OpenAI API)
+        headers = {"X-Session-Done": "true"} if session_done else None
 
         return ChatOpenAI(
             model=self.model,
@@ -168,6 +171,7 @@ class MetaClawClient:
             api_key=self.api_key,
             base_url=base_url,
             max_retries=2,
+            default_headers=headers,
             top_p=self.config.metaclaw_top_p,
             max_tokens=self.config.metaclaw_max_tokens,
         ).bind_tools([self._create_mcp_server_tool()])
@@ -333,8 +337,8 @@ LANGUAGE: Always respond in the same language the user is using. If the user wri
                 metaclaw_msgs.append(AIMessage(content=msg.get("content", "")))
 
         try:
-            # Stage 1: Invoke MetaClaw
-            metaclaw_llm = await self._get_metaclaw_llm(temperature)
+            # Stage 1: Invoke MetaClaw with session_done=True to trigger memory ingestion
+            metaclaw_llm = await self._get_metaclaw_llm(temperature, session_done=True)
             metaclaw_response = await metaclaw_llm.ainvoke(metaclaw_msgs)
 
             content_text = ""
