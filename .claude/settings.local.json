@@ -1,7 +1,30 @@
 {
   "permissions": {
     "allow": [
-      "mcp__projectscan__scan_project_structure"
+      "mcp__projectscan__scan_project_structure",
+      "Bash(python -c \"import main; print\\('main.py imports OK'\\)\")",
+      "Bash(python -c \"import metaclaw_client; print\\('metaclaw_client.py imports OK'\\)\")",
+      "Bash(python -m py_compile metaclaw_client.py)",
+      "Bash(python -m py_compile main.py)",
+      "mcp__plugin_context7_context7__resolve-library-id",
+      "mcp__plugin_context7_context7__query-docs",
+      "WebSearch",
+      "Bash(python -c \"import sys; print\\(sys.version\\)\")",
+      "Bash(python main.py)",
+      "Bash(pip list *)",
+      "Bash(pip search *)",
+      "Bash(pip index *)",
+      "Bash(pip install *)",
+      "Bash(python -c \"import langchain_mcp_adapters; print\\('langchain_mcp_adapters imported successfully'\\)\")",
+      "Bash(timeout 5 python -c \"import main\")",
+      "Bash(python -c \"import config; import database; import shared; import metaclaw_client; print\\('All imports successful'\\)\")",
+      "Bash(python -c \"import config; import database; import shared; import metaclaw_client; print\\('✓ All imports successful'\\)\")",
+      "Bash(echo \"Import failed with exit code $?\")",
+      "Bash(timeout 5 python -c \"from main import app; print\\('FastAPI app loaded successfully'\\)\")",
+      "Bash(start /B python main.py)",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(taskkill /F /IM python.exe)",
+      "Bash(python *)"
     ]
   }
 }

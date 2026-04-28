@@ -6,6 +6,14 @@ import { v4 as uuidv4 } from "uuid";
 import type { ChatMessage, ChatSettings, ChatHistoryItem } from "@/lib/types";
 import { BACKEND_API, MODEL_CONFIG } from "@/lib/config";
 
+// Simple error logger - can be replaced with a proper logging service
+const logError = (...args: any[]) => {
+  if (process.env.NODE_ENV !== 'production') {
+    console.error(...args);
+  }
+  // In production, integrate with your monitoring service (e.g., Sentry)
+};
+
 interface ChatState {
   messages: ChatMessage[];
   history: ChatHistoryItem[];
@@ -208,20 +216,26 @@ export const useChatStore = create<ChatState>()(
 
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
+          const bufferRef = { current: "" }; // Mutable buffer for incomplete lines
           let fullContent = "";
           let hasAddedAiMessage = false;
 
           while (true) {
             const { done, value } = await reader.read();
-            if (done) break;
 
+            // Decode chunk and append to buffer
             const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split("\n\n");
+            bufferRef.current += chunk;
+
+            // Split by double newline (SSE delimiter)
+            const lines = bufferRef.current.split("\n\n");
+            // Keep the last incomplete line in the buffer
+            bufferRef.current = lines.pop() || "";
 
             for (const line of lines) {
               if (line.startsWith("data: ")) {
                 const dataStr = line.replace("data: ", "").trim();
-                
+
                 if (dataStr === "[DONE]") {
                   break;
                 }
@@ -230,7 +244,7 @@ export const useChatStore = create<ChatState>()(
                   const data = JSON.parse(dataStr);
                   if (data.content) {
                     fullContent += data.content;
-                    
+
                     if (!hasAddedAiMessage) {
                       set((state) => ({
                         messages: [...state.messages, {
@@ -256,15 +270,48 @@ export const useChatStore = create<ChatState>()(
                 }
               }
             }
+
+            if (done) break;
           }
 
-          persistCurrentChat();
-        } catch (error: any) {
-          console.error("Error calling AI flow:", error);
+          // Flush any remaining data in buffer after stream ends
+          if (bufferRef.current && bufferRef.current.startsWith("data: ")) {
+            const line = bufferRef.current;
+            const dataStr = line.replace("data: ", "").trim();
+            if (dataStr !== "[DONE]") {
+              try {
+                const data = JSON.parse(dataStr);
+                if (data.content) {
+                  fullContent += data.content;
+                  if (!hasAddedAiMessage) {
+                    set((state) => ({
+                      messages: [...state.messages, {
+                        id: aiMessageId,
+                        role: "model",
+                        content: fullContent,
+                        timestamp: new Date().toISOString(),
+                      }],
+                    }));
+                  } else {
+                    set((state) => ({
+                      messages: state.messages.map((m) =>
+                        m.id === aiMessageId ? { ...m, content: fullContent } : m
+                      ),
+                    }));
+                  }
+                }
+              } catch (e) {
+                // Ignore parsing errors on final flush
+              }
+            }
+          }
+
+        } catch (error: unknown) {
+          logError("Error calling AI flow:", error);
           const errorMessage: ChatMessage = {
             id: uuidv4(),
             role: "system",
-            content: error.message || "Failed to connect to backend.",
+            content: error instanceof Error ? error.message : "Failed to connect to backend.",
             timestamp: new Date().toISOString(),
           };
           set((state) => ({
@@ -287,10 +334,11 @@ export const useChatStore = create<ChatState>()(
       }),
       onRehydrateStorage: () => (state) => {
         if (state) {
-          // Migration: if provider is metaclaw, reset to gemini
-          // Use type casting since 'metaclaw' is no longer in the type definition
-          if ((state.settings?.provider as string) === "metaclaw") {
-            state.settings.provider = "gemini";
+          // Migration: ensure provider is valid
+          const validProviders = ['gemini', 'groq'];
+          const provider = state.settings?.provider;
+          if (!provider || !validProviders.includes(provider)) {
+            state.settings.provider = 'gemini';
             state.settings.model = MODEL_CONFIG.gemini.defaultModel;
           }
 
