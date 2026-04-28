@@ -38,6 +38,8 @@ class LLMConfig:
     # MCP settings
     mcp_connection_timeout: float
     mcp_initialization_timeout: float
+    mcp_connection_retries: int
+    mcp_retry_delay: float
 
     # MongoDB settings
     mongodb_url: str
@@ -59,7 +61,8 @@ class LLMConfig:
             or "http://localhost:2024"
         )
 
-        return cls(
+        # Build configuration
+        config = cls(
             # Primary provider
             default_provider=os.getenv("LLM_PROVIDER", "gemini"),
             gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
@@ -70,7 +73,7 @@ class LLMConfig:
             # MetaClaw proxy
             metaclaw_enabled=os.getenv("METACLAW_ENABLED", "false").lower() == "true",
             metaclaw_base_url=os.getenv("METACLAW_BASE_URL", "http://localhost:30000/v1"),
-            metaclaw_api_key=os.getenv("METACLAW_API_KEY", "metaclaw"),
+            metaclaw_api_key=os.getenv("METACLAW_API_KEY"),  # No default - required when enabled
             metaclaw_model=os.getenv("METACLAW_MODEL", "qwen/qwen3-next-80b-a3b-instruct"),
             metaclaw_top_p=float(os.getenv("METACLAW_TOP_P", "0.5")),
             metaclaw_max_tokens=int(os.getenv("METACLAW_MAX_TOKENS", "100000")),
@@ -86,11 +89,22 @@ class LLMConfig:
             # MCP settings
             mcp_connection_timeout=float(os.getenv("MCP_CONNECTION_TIMEOUT", "10.0")),
             mcp_initialization_timeout=float(os.getenv("MCP_INIT_TIMEOUT", "10.0")),
+            mcp_connection_retries=int(os.getenv("MCP_CONNECTION_RETRIES", "3")),
+            mcp_retry_delay=float(os.getenv("MCP_RETRY_DELAY", "2.0")),
 
             # MongoDB settings
             mongodb_url=os.getenv("MONGODB_URL", "mongodb://mongodb:27017"),
             mongodb_db=os.getenv("MONGODB_DB", "docker"),
         )
+
+        # Validate configuration
+        if config.metaclaw_enabled and not config.metaclaw_api_key:
+            raise ValueError(
+                "METACLAW_API_KEY is required when METACLAW_ENABLED=true. "
+                "Set the environment variable or disable MetaClaw."
+            )
+
+        return config
 
     def get_llm_provider(self, provider_override: str = None) -> str:
         """Get the effective provider to use"""
