@@ -8,7 +8,7 @@ import { BACKEND_API, MODEL_CONFIG } from "@/lib/config";
 
 // Simple error logger - can be replaced with a proper logging service
 const logError = (...args: any[]) => {
-  if (process.env.NODE_ENV !== 'production') {
+  if (process.env.NODE_ENV !== "production") {
     console.error(...args);
   }
   // In production, integrate with your monitoring service (e.g., Sentry)
@@ -66,7 +66,8 @@ export const useChatStore = create<ChatState>()(
           newSettings.provider !== currentSettings.provider
         ) {
           updatedSettings.model =
-            MODEL_CONFIG[newSettings.provider as keyof typeof MODEL_CONFIG]?.defaultModel || updatedSettings.model;
+            MODEL_CONFIG[newSettings.provider as keyof typeof MODEL_CONFIG]
+              ?.defaultModel || updatedSettings.model;
         }
         set({ settings: updatedSettings, lastActive: Date.now() });
       },
@@ -163,7 +164,7 @@ export const useChatStore = create<ChatState>()(
           currentChatId,
           persistCurrentChat,
         } = get();
-        
+
         const settings = overrideSettings || currentSettings;
 
         // Ensure we have a local chat ID
@@ -216,9 +217,60 @@ export const useChatStore = create<ChatState>()(
 
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
-          const bufferRef = { current: "" }; // Mutable buffer for incomplete lines
+          const bufferRef = { current: "" }; // Mutable buffer for incomplete SSE frames
           let fullContent = "";
           let hasAddedAiMessage = false;
+          let streamComplete = false;
+
+          const upsertAiMessage = (content: string) => {
+            if (!hasAddedAiMessage) {
+              set((state) => ({
+                messages: [
+                  ...state.messages,
+                  {
+                    id: aiMessageId,
+                    role: "model",
+                    content,
+                    timestamp: new Date().toISOString(),
+                  },
+                ],
+              }));
+              hasAddedAiMessage = true;
+            } else {
+              set((state) => ({
+                messages: state.messages.map((m) =>
+                  m.id === aiMessageId ? { ...m, content } : m,
+                ),
+              }));
+            }
+          };
+
+          const handleSsePayload = (dataStr: string) => {
+            if (dataStr === "[DONE]") {
+              streamComplete = true;
+              return;
+            }
+
+            const data = JSON.parse(dataStr);
+            const eventType = data.type as string | undefined;
+
+            if (eventType === "done") {
+              streamComplete = true;
+              return;
+            }
+
+            if (eventType === "error" || data.error) {
+              throw new Error(data.error || "Backend stream error");
+            }
+
+            const content =
+              eventType === "status" ? data.message : data.content;
+
+            if (typeof content === "string" && content.length > 0) {
+              fullContent += content;
+              upsertAiMessage(fullContent);
+            }
+          };
 
           while (true) {
             const { done, value } = await reader.read();
@@ -233,89 +285,50 @@ export const useChatStore = create<ChatState>()(
             bufferRef.current = lines.pop() || "";
 
             for (const line of lines) {
-              if (line.startsWith("data: ")) {
-                const dataStr = line.replace("data: ", "").trim();
+              const dataLines = line
+                .split("\n")
+                .filter((entry) => entry.startsWith("data:"))
+                .map((entry) => entry.replace(/^data:\s?/, ""));
 
-                if (dataStr === "[DONE]") {
-                  break;
-                }
-
-                try {
-                  const data = JSON.parse(dataStr);
-                  if (data.content) {
-                    fullContent += data.content;
-
-                    if (!hasAddedAiMessage) {
-                      set((state) => ({
-                        messages: [...state.messages, {
-                          id: aiMessageId,
-                          role: "model",
-                          content: fullContent,
-                          timestamp: new Date().toISOString(),
-                        }],
-                      }));
-                      hasAddedAiMessage = true;
-                    } else {
-                      set((state) => ({
-                        messages: state.messages.map((m) =>
-                          m.id === aiMessageId ? { ...m, content: fullContent } : m
-                        ),
-                      }));
-                    }
-                  } else if (data.error) {
-                    throw new Error(data.error);
-                  }
-                } catch (e) {
-                  // Ignore partial parsing errors if the line is incomplete
-                }
+              for (const dataStr of dataLines) {
+                handleSsePayload(dataStr.trim());
+                if (streamComplete) break;
               }
+
+              if (streamComplete) break;
             }
 
-            if (done) break;
+            if (done || streamComplete) break;
           }
 
           // Flush any remaining data in buffer after stream ends
-          if (bufferRef.current && bufferRef.current.startsWith("data: ")) {
-            const line = bufferRef.current;
-            const dataStr = line.replace("data: ", "").trim();
-            if (dataStr !== "[DONE]") {
-              try {
-                const data = JSON.parse(dataStr);
-                if (data.content) {
-                  fullContent += data.content;
-                  if (!hasAddedAiMessage) {
-                    set((state) => ({
-                      messages: [...state.messages, {
-                        id: aiMessageId,
-                        role: "model",
-                        content: fullContent,
-                        timestamp: new Date().toISOString(),
-                      }],
-                    }));
-                  } else {
-                    set((state) => ({
-                      messages: state.messages.map((m) =>
-                        m.id === aiMessageId ? { ...m, content: fullContent } : m
-                      ),
-                    }));
-                  }
-                }
-              } catch (e) {
-                // Ignore parsing errors on final flush
-              }
+          if (bufferRef.current && bufferRef.current.startsWith("data:")) {
+            const dataLines = bufferRef.current
+              .split("\n")
+              .filter((entry) => entry.startsWith("data:"))
+              .map((entry) => entry.replace(/^data:\s?/, ""));
+
+            for (const dataStr of dataLines) {
+              handleSsePayload(dataStr.trim());
+              if (streamComplete) break;
             }
           }
-
         } catch (error: unknown) {
           logError("Error calling AI flow:", error);
           const errorMessage: ChatMessage = {
             id: uuidv4(),
             role: "system",
-            content: error instanceof Error ? error.message : "Failed to connect to backend.",
+            content:
+              error instanceof Error
+                ? error.message
+                : "Failed to connect to backend.",
             timestamp: new Date().toISOString(),
           };
           set((state) => ({
-            messages: [...state.messages.filter(m => m.id !== aiMessageId), errorMessage],
+            messages: [
+              ...state.messages.filter((m) => m.id !== aiMessageId),
+              errorMessage,
+            ],
             lastActive: Date.now(),
           }));
         } finally {
@@ -335,10 +348,10 @@ export const useChatStore = create<ChatState>()(
       onRehydrateStorage: () => (state) => {
         if (state) {
           // Migration: ensure provider is valid
-          const validProviders = ['gemini', 'groq'];
+          const validProviders = ["gemini", "groq"];
           const provider = state.settings?.provider;
           if (!provider || !validProviders.includes(provider)) {
-            state.settings.provider = 'gemini';
+            state.settings.provider = "gemini";
             state.settings.model = MODEL_CONFIG.gemini.defaultModel;
           }
 

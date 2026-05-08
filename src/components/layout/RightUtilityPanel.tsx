@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/lib/hooks/use-chat-store";
-import { MODEL_CONFIG, BACKEND_API } from "@/lib/config";
+import { MODEL_CONFIG, BACKEND_API, fetchBackendHealth, type BackendHealth } from "@/lib/config";
 import {
   Select,
   SelectContent,
@@ -22,6 +22,21 @@ export function RightUtilityPanel() {
   const [mcpInput, setMcpInput] = useState("");
   const [isVerifyingMcp, setIsVerifyingMcp] = useState(false);
   const { toast } = useToast();
+  const [health, setHealth] = useState<BackendHealth | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    fetchBackendHealth()
+      .then((data) => {
+        if (isMounted) setHealth(data);
+      })
+      .catch(() => {
+        if (isMounted) setHealth(null);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const providers = Object.keys(MODEL_CONFIG);
   const currentModels = MODEL_CONFIG[settings.provider]?.models || [];
@@ -42,7 +57,13 @@ export function RightUtilityPanel() {
       const data = await response.json();
 
       if (!response.ok || data.status === "error") {
-        throw new Error(data.detail || "Connection refused by host or invalid MCP URL.");
+        const actionableMessages: Record<string, string> = {
+          timeout: "The MCP server did not respond before the timeout. Check that it is running and reachable.",
+          connect_error: "The backend could not connect to this MCP server. Verify the URL, port, and Docker/host networking.",
+          initialization_error: "The server responded but failed MCP initialization. Confirm it supports the MCP streamable HTTP transport.",
+          unsupported_transport: "This URL or transport is not supported. Use a valid MCP streamable HTTP endpoint.",
+        };
+        throw new Error(actionableMessages[data.errorCode] || data.detail || "Connection refused by host or invalid MCP URL.");
       }
 
       const newMcp = {
@@ -68,7 +89,7 @@ export function RightUtilityPanel() {
       console.error("MCP Verification Error:", error);
       toast({
         title: "Connection Failed",
-        description: "Ethereal could not reach the specified neural node.",
+        description: error instanceof Error ? error.message : "Ethereal could not reach the specified neural node.",
         variant: "destructive"
       });
     } finally {
@@ -110,6 +131,21 @@ export function RightUtilityPanel() {
       </div>
 
       <div className="flex-1 overflow-y-auto space-y-6 pr-2 no-scrollbar">
+        {health?.metaclawEnabled && (
+          <div className="space-y-2 rounded-2xl border border-violet-500/20 bg-violet-500/10 p-4">
+            <div className="flex items-center gap-2 text-violet-200">
+              <span className="material-symbols-outlined text-base">psychology</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest">MetaClaw proxy enabled</span>
+            </div>
+            <p className="text-[10px] leading-relaxed text-on-surface-variant">
+              Provider/model selections are used for direct or fallback mode. Current chat requests route through MetaClaw.
+            </p>
+            <p className="text-[9px] font-mono text-violet-200/80">
+              Fallbacks: {health.configuredFallbacks.length > 0 ? health.configuredFallbacks.join(', ') : 'none configured'}
+            </p>
+          </div>
+        )}
+
         {/* Provider Selection */}
         <div className="space-y-2">
           <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest ml-1">Provider</label>

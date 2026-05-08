@@ -7,8 +7,7 @@ Handles two-stage routing: MetaClaw (intent detection) → Gemini (execution).
 import os
 import json
 import logging
-from typing import Optional, Dict, Any, AsyncGenerator, List
-from langchain_core.language_models import BaseLanguageModel
+from typing import Optional, Dict, Any, AsyncGenerator, List, cast
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -25,6 +24,26 @@ from shared import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def sse_event(payload: Dict[str, Any]) -> str:
+    """Format a typed SSE data payload."""
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+def sse_content(content: str) -> str:
+    """Emit a typed content event while preserving the legacy content field."""
+    return sse_event({"type": "content", "content": content})
+
+
+def sse_error(error: str) -> str:
+    """Emit a typed error event while preserving the legacy error field."""
+    return sse_event({"type": "error", "error": error})
+
+
+def sse_done() -> str:
+    """Emit typed done plus legacy [DONE] sentinel."""
+    return f"data: {json.dumps({'type': 'done'})}\n\ndata: [DONE]\n\n"
 
 
 class MetaClawError(Exception):
@@ -66,18 +85,73 @@ class MetaClawClient:
         if not self.enabled:
             raise MetaClawDisabledError("MetaClaw is disabled in configuration")
 
+    def _extract_create_mcp_tool_call(self, response: Any) -> Optional[str]:
+        """
+        Extract create_mcp_server tool call from response.
+        Returns requirements string if found, None otherwise.
+        """
+        tool_calls = []
+
+        if hasattr(response, "tool_calls") and response.tool_calls:
+            tool_calls = response.tool_calls
+        elif hasattr(response, "additional_kwargs"):
+            raw = response.additional_kwargs.get("tool_calls", [])
+            for tc in raw:
+                func = tc.get("function", {}) if isinstance(tc, dict) else {}
+                name = func.get("name", "")
+                if name == "create_mcp_server":
+                    args_raw = func.get("arguments", "{}")
+                    try:
+                        args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+                    except Exception:
+                        args = {}
+                    return args.get("requirements", "") if isinstance(args, dict) else ""
+            return None
+
+        for tc in tool_calls:
+            tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "")
+            if tc_name == "create_mcp_server":
+                tc_args = tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", {})
+                if isinstance(tc_args, str):
+                    try:
+                        tc_args = json.loads(tc_args)
+                    except Exception:
+                        tc_args = {}
+                return tc_args.get("requirements", "") if isinstance(tc_args, dict) else ""
+
+        return None
+
+    def _extract_use_mcp_tool_call(self, response: Any) -> bool:
+        """Check if response contains a use_mcp_tools tool call."""
+        tool_calls = []
+        if hasattr(response, "tool_calls") and response.tool_calls:
+            tool_calls = response.tool_calls
+        elif hasattr(response, "additional_kwargs"):
+            raw = response.additional_kwargs.get("tool_calls", [])
+            for tc in raw:
+                func = tc.get("function", {}) if isinstance(tc, dict) else {}
+                name = func.get("name", "")
+                if name == "use_mcp_tools":
+                    return True
+            return False
+        for tc in tool_calls:
+            tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "")
+            if tc_name == "use_mcp_tools":
+                return True
+        return False
+
     def _detect_tool_intent(self, response, content_text: str) -> Optional[Dict[str, Any]]:
         """
         Analyze MetaClaw's response to detect if it wants to call tools.
         Returns dict with type and requirements if intent detected, None otherwise.
         """
-        # Check for structured tool call first using shared extraction
-        requirements = extract_create_mcp_tool_call(response)
+        # Check for structured tool call first using instance method
+        requirements = self._extract_create_mcp_tool_call(response)
         if requirements is not None:
             return {"type": "create_mcp_server", "requirements": requirements}
 
         # Check for use_mcp_tools tool call
-        if extract_use_mcp_tool_call(response):
+        if self._extract_use_mcp_tool_call(response):
             return {"type": "use_mcp_tools"}
 
         # Fallback: keyword scan
@@ -110,7 +184,7 @@ class MetaClawClient:
                 return extracted[:500] if extracted else text[:500]
         return text[:800]
 
-    async def _get_metaclaw_llm(self, temperature: float, session_done: bool = False) -> BaseLanguageModel:
+    async def _get_metaclaw_llm(self, temperature: float, session_done: bool = False) -> Any:
         """Initialize MetaClaw LLM with create_mcp_server tool bound"""
         base_url = self.base_url
         if "localhost" in base_url and os.path.exists("/.dockerenv"):
@@ -124,15 +198,15 @@ class MetaClawClient:
         return ChatOpenAI(
             model=self.model,
             temperature=temperature,
-            api_key=self.api_key,
+            api_key=self.api_key,  # type: ignore
             base_url=base_url,
             max_retries=2,
             default_headers=headers,
             top_p=self.config.metaclaw_top_p,
-            max_tokens=self.config.metaclaw_max_tokens,
+            max_completion_tokens=self.config.metaclaw_max_tokens,
         ).bind_tools([create_mcp_server_tool(), create_use_mcp_tools_tool()])
 
-    async def _get_gemini_executor(self, temperature: float) -> BaseLanguageModel:
+    async def _get_gemini_executor(self, temperature: float):
         """Initialize Gemini executor for tool execution"""
         gemini_key = self.config.gemini_api_key
         if not gemini_key:
@@ -144,10 +218,10 @@ class MetaClawClient:
             model="gemini-2.5-flash",
             temperature=temperature,
             max_retries=2,
-            api_key=gemini_key,
+            api_key=gemini_key,  # type: ignore
         ).bind_tools([create_mcp_server_tool()])
 
-    async def _get_fallback_llm(self, temperature: float) -> BaseLanguageModel:
+    async def _get_fallback_llm(self, temperature: float):
         """
         Initialize the fallback LLM (Gemini or Groq) for casual chat.
         Prioritizes Gemini if configured, otherwise Groq.
@@ -159,14 +233,14 @@ class MetaClawClient:
                 model=self.config.gemini_model,
                 temperature=temperature,
                 max_retries=2,
-                api_key=self.config.gemini_api_key
+                api_key=self.config.gemini_api_key,  # type: ignore
             )
         elif self.config.default_provider == "groq" and self.config.groq_api_key:
             logger.info(f"Using Groq as fallback: model={self.config.groq_model}")
             return ChatGroq(
-                model_name=self.config.groq_model,
+                model=self.config.groq_model,
                 temperature=temperature,
-                api_key=self.config.groq_api_key
+                api_key=self.config.groq_api_key,  # type: ignore
             )
         else:
             # Fallback to any available key if default_provider not explicitly set or keys missing
@@ -176,14 +250,14 @@ class MetaClawClient:
                     model=self.config.gemini_model,
                     temperature=temperature,
                     max_retries=2,
-                    api_key=self.config.gemini_api_key
+                    api_key=self.config.gemini_api_key,  # type: ignore
                 )
             elif self.config.groq_api_key:
                 logger.info("[MetaClawClient] Using Groq for fallback (default provider not explicitly set or invalid).")
                 return ChatGroq(
-                    model_name=self.config.groq_model,
+                    model=self.config.groq_model,
                     temperature=temperature,
-                    api_key=self.config.groq_api_key
+                    api_key=self.config.groq_api_key,  # type: ignore
                 )
             else:
                 raise MetaClawError("No fallback LLM provider configured (GEMINI_API_KEY or GROQ_API_KEY missing.)")
@@ -224,7 +298,8 @@ IMPORTANT: If the user provides an API guide, technical documentation, or any re
 LANGUAGE: Always respond in the same language the user is using. If the user writes in Vietnamese, respond in Vietnamese. If in English, respond in English. Match their language automatically for every message.
 """
 
-        metaclaw_msgs = [SystemMessage(content=metaclaw_system)]
+        from langchain_core.messages import BaseMessage
+        metaclaw_msgs: list[BaseMessage] = [SystemMessage(content=metaclaw_system)]
         for msg in messages:
             if msg.get("role") == "user":
                 metaclaw_msgs.append(HumanMessage(content=msg.get("content", "")))
@@ -240,9 +315,11 @@ LANGUAGE: Always respond in the same language the user is using. If the user wri
             if hasattr(metaclaw_response, "content"):
                 content_text = metaclaw_response.content or ""
             elif isinstance(metaclaw_response, dict):
-                content_text = metaclaw_response.get("content", "")
+                content_text = metaclaw_response.get("content", "") or ""
             else:
                 content_text = str(metaclaw_response)
+            # Ensure content_text is always a string
+            content_text = cast(str, content_text)
 
             logger.info(f"[MetaClaw] Response length: {len(content_text)} chars")
             logger.debug(f"[MetaClaw] Response preview: {content_text[:300]}...")
@@ -282,7 +359,8 @@ MetaClaw's Context: {content_text}
 
 LANGUAGE: Always respond in the same language the user is using. If the user writes in Vietnamese, respond in Vietnamese. If in English, respond in English. Match their language automatically for every message.
 """
-                fallback_messages = [SystemMessage(content=fallback_system_prompt)]
+                from langchain_core.messages import BaseMessage
+                fallback_messages: list[BaseMessage] = [SystemMessage(content=fallback_system_prompt)]
                 for msg in messages:
                     if msg.get("role") == "user":
                         fallback_messages.append(HumanMessage(content=msg.get("content", "")))
@@ -293,14 +371,14 @@ LANGUAGE: Always respond in the same language the user is using. If the user wri
                 async for chunk in fallback_llm.astream(fallback_messages):
                     content = chunk.content
                     if content:
-                        yield f"data: {json.dumps({'content': content})}\n\n"
-                yield "data: [DONE]\n\n"
+                        yield sse_content(str(content))
+                yield sse_done()
 
         except Exception as e:
             error_msg = str(e)
             logger.error(f"[MetaClaw] Error: {error_msg}")
-            yield f"data: {json.dumps({'error': f'MetaClaw error: {error_msg}'})}\n\n"
-            yield "data: [DONE]\n\n"
+            yield sse_error(f"MetaClaw error: {error_msg}")
+            yield sse_done()
 
     async def _execute_with_gemini(
         self,
@@ -323,8 +401,8 @@ LANGUAGE: Always respond in the same language the user is using. If the user wri
             gemini_agent = await self._get_gemini_executor(temperature)
         except Exception as e:
             error_msg = str(e)
-            yield f"data: {json.dumps({'content': f'\\n\\n> [ERROR]: Cannot create Gemini executor: {error_msg}\\n\\n'})}\n\n"
-            yield "data: [DONE]\n\n"
+            yield sse_content(f"\n\n> [ERROR]: Cannot create Gemini executor: {error_msg}\n\n")
+            yield sse_done()
             return
 
         try:
@@ -339,7 +417,8 @@ DO NOT respond with text explanations — just trigger the tool and let the syst
 Requirements from MetaClaw's analysis:
 {requirements}
 """
-            gemini_msgs = [SystemMessage(content=gemini_system)]
+            from langchain_core.messages import BaseMessage
+            gemini_msgs: list[BaseMessage] = [SystemMessage(content=gemini_system)]
             for msg in original_messages:
                 if msg.get("role") == "user":
                     gemini_msgs.append(HumanMessage(content=msg.get("content", "")))
@@ -353,7 +432,7 @@ Requirements from MetaClaw's analysis:
             gemini_response = await gemini_agent.ainvoke(gemini_msgs)
             logger.info(f"[Gemini] Response type: {type(gemini_response)}")
 
-            detected_requirements = extract_create_mcp_tool_call(gemini_response)
+            detected_requirements = self._extract_create_mcp_tool_call(gemini_response)
 
             if detected_requirements is not None:
                 build_requirements = detected_requirements or requirements
@@ -368,5 +447,5 @@ Requirements from MetaClaw's analysis:
 
         except Exception as e:
             logger.exception("Error during Gemini execution")
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
-            yield "data: [DONE]\n\n"
+            yield sse_error(str(e))
+            yield sse_done()

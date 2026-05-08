@@ -1,112 +1,138 @@
 # 🚀 Ethereal Intelligence: Unified MCP Ecosystem
 
-[![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=next.js)](https://nextjs.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688?logo=fastapi)](https://fastapi.tiangolo.com/)
-[![Gemini](https://img.shields.io/badge/Gemini-2.0--Flash-4285F4?logo=google-gemini)](https://aistudio.google.com/)
-[![MetaClaw](https://img.shields.io/badge/MetaClaw-Enabled-blueviolet)](https://github.com/metaclaw)
-
 ![Ethereal Intelligence Preview](./img/demo.gif)
-
----
 
 ## 🧠 Architecture: Brain + Arms
 
-Our core philosophy separates reasoning from execution to ensure maximum reliability and precision:
+This repository is the browser-facing Next.js chat client plus a FastAPI bridge. It talks to these services with explicit URL boundaries:
 
-- **Brain (MetaClaw Proxy)**: The reasoning engine. It classifies user intent, identifies the necessary tools, and extracts high-fidelity parameters from the conversation.
-- **Arms (Gemini Flash)**: The execution layer. It receives structured signals from the Brain and performs the actual tool calls—from standard RAG to complex environment mutations.
-- **Orchestrator (FastAPI Backend)**: A high-performance bridge that handles SSE (Server-Sent Events) streaming, session persistence, and proxies requests to LangGraph build services.
+| Component               | Role                                                 | Browser-facing URL                              | Backend/container URL                                                                    |
+| ----------------------- | ---------------------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Next.js frontend        | Chat UI                                              | `http://localhost:9002`                         | n/a                                                                                      |
+| FastAPI backend         | Chat streaming, MCP connection checks, mcp-gen proxy | `NEXT_PUBLIC_BACKEND_URL=http://localhost:8000` | `BACKEND_PORT=8000`                                                                      |
+| LangGraph agent service | MCP server generation/build orchestration            | n/a                                             | `LANGGRAPH_API_URL=http://agent-service:2024` in Docker, `http://localhost:2024` locally |
+| mcp-gen manager         | Generated MCP server list and feedback               | proxied through FastAPI by default              | `MCP_GEN_URL=http://docker-manager:8080` in Docker, `http://localhost:8080` locally      |
+| MongoDB                 | Feedback/history storage integrations                | n/a                                             | `MONGODB_URL=mongodb://mongodb:27017` in Docker                                          |
 
----
+Core runtime flow:
+
+- **Brain (MetaClaw Proxy)**: Optional reasoning and intent-routing layer. When `METACLAW_ENABLED=true`, FastAPI routes all chat requests through MetaClaw regardless of the selected frontend provider.
+- **Fallback/direct providers (Gemini/Groq)**: Used directly when MetaClaw is disabled and as fallback/execution providers when MetaClaw delegates.
+- **Orchestrator (FastAPI Backend)**: Streams SSE responses, connects to MCP servers, proxies generated-server list/feedback calls to mcp-gen, and delegates MCP build requests to LangGraph.
 
 ## ✨ Key Features
 
-### 📡 Unified SSE Streaming
-
-Experience real-time AI responses with zero-latency streaming. The backend handles complex tool-calling handoffs and proxies progress logs directly from build agents to your screen.
-
-### 🏗️ Autonomous MCP Builder
-
-Transform conversations into code. Directly integrated with our [LangChain Backend](https://github.com/your-repo/langchain-app), you can command the AI to build, configure, and initialize new MCP servers in real-time.
-
-### 🔌 Federated MCP Interaction
-
-Connect to multiple MCP servers simultaneously. The system intelligently switches contexts between local environment tools, cloud APIs, and custom-built servers.
-
-### 💎 Premium Interface
-
-A sleek, glassmorphism-inspired UI built with Next.js. Features include:
-
-- **Persistent Chat History**: Never lose context with our integrated storage.
-- **Status Indicators**: Real-time feedback for tool execution and background tasks.
-- **Dynamic Layouts**: Responsive design that adapts to complex data visualizations and code blocks.
-
----
+- Real-time SSE chat streaming.
+- Autonomous MCP server build handoff through LangGraph.
+- MCP server connection metadata checks with structured error codes.
+- Generated MCP server feedback list proxied through FastAPI, avoiding browser CORS and Docker service-name assumptions.
+- Persistent chat history and responsive Next.js UI.
 
 ## 🛠️ Technical Stack
 
 - **Frontend**: Next.js 15, React 19, TypeScript, Tailwind CSS, Shadcn UI.
-- **Backend**: FastAPI (Python), LangChain, LangGraph SDK.
-- **Services**: Dockerized MongoDB, Gemini API, MetaClaw Gateway.
-
----
+- **Backend**: FastAPI, LangChain, LangGraph SDK, MCP client libraries.
+- **Services**: MetaClaw gateway, LangGraph agent service, mcp-gen manager, MongoDB.
 
 ## 🚀 Getting Started
 
 ### Prerequisites
 
-- Docker & Docker Compose
-- Gemini API Key ([Get it here](https://aistudio.google.com/app/apikey))
-- MetaClaw Instance (Optional but recommended for "Brain" functionality)
+- Docker and Docker Compose.
+- Node.js 20+ for local frontend development.
+- Python 3.12+ for local backend development.
+- At least one configured provider: `GEMINI_API_KEY`, `GROQ_API_KEY`, or `METACLAW_ENABLED=true` with `METACLAW_API_KEY`.
 
 ### Configuration
 
-Create a `.env` file in the root directory:
+Copy the example file and edit values:
 
-```bash
-# 1. Core API
-GEMINI_API_KEY="your_api_key_here"
-
-# 2. MetaClaw (Brain) Configuration
-METACLAW_ENABLED=true
-METACLAW_BASE_URL="http://host.docker.internal:30000/v1"
-METACLAW_API_KEY="your_metaclaw_key"
-
-# 3. Port Configuration
-NEXT_PUBLIC_BACKEND_PORT=8000
+```powershell
+copy .env.example .env
 ```
 
-### Installation (Docker)
+Important variable groups:
 
-```bash
-docker-compose up --build -d
+```env
+# Browser/public: embedded in the Next.js browser bundle
+NEXT_PUBLIC_BACKEND_URL="http://localhost:8000"
+
+# Backend-only/container runtime
+BACKEND_PORT=8000
+LANGGRAPH_API_URL="http://localhost:2024"
+MCP_GEN_URL="http://localhost:8080"
+MONGODB_URL="mongodb://mongodb:27017"
 ```
 
-The Frontend will be available at `http://localhost:9002` and the Backend at `http://localhost:8000`.
+Do not use Docker-internal service names such as `agent-service`, `docker-manager`, or `mongodb` in browser-facing `NEXT_PUBLIC_*` variables. The user's browser runs on the host, not inside the Docker network.
 
----
+## 🐳 Docker Startup
 
-## 🛠️ Development
+```powershell
+docker compose up --build -d
+```
 
-To run the backend locally:
+Canonical ports for this repository:
 
-```bash
+- Frontend: `http://localhost:9002`
+- Backend: `http://localhost:8000`
+
+When this repository is started by a cross-project manage script, this frontend remains canonical at `http://localhost:9002` unless the whole ecosystem changes ports together.
+
+## 🛠️ Local Development
+
+Backend on Windows PowerShell:
+
+```powershell
 cd backend
 python -m venv venv
-source venv/bin/activate  # or venv\Scripts\activate on Windows
+.\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python main.py
+python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-To run the frontend locally:
+Frontend:
 
-```bash
+```powershell
 npm install
 npm run dev
 ```
 
----
+The frontend dev server runs on `http://localhost:9002`.
+
+## 📡 Chat SSE Contract
+
+The backend emits Server-Sent Events with JSON `data:` payloads. The frontend remains backward compatible with older `{ "content": "..." }` chunks and the `[DONE]` sentinel.
+
+Preferred typed events:
+
+```json
+{"type":"content","content":"text"}
+{"type":"status","message":"text"}
+{"type":"error","error":"message"}
+{"type":"done"}
+```
+
+Legacy events still accepted by the frontend:
+
+```json
+{"content":"text"}
+{"error":"message"}
+```
+
+```text
+data: [DONE]
+```
+
+## 🔌 MCP Metadata Errors
+
+`POST /mcp/metadata` returns structured error information when a server cannot be reached:
+
+- `timeout`: connection or initialization timed out.
+- `connect_error`: backend could not connect to the URL.
+- `initialization_error`: transport connected but MCP initialization failed.
+- `unsupported_transport`: invalid URL or unsupported transport.
 
 ## 📄 License
 
-MIT License. See [LICENSE](LICENSE) for details.
+MIT License.

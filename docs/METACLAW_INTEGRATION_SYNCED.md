@@ -67,6 +67,7 @@ User → Chatbot Backend → MetaClaw Proxy (:30000) → Gemini API
 6. If no intent → MetaClaw's text response streamed directly
 
 **Key files:**
+
 - `chatbot_mcp_client/backend/main.py:566-711` - `_handle_metaclaw_request()` and `_execute_with_gemini()`
 - `langChain-application/my_agent/utils/llm_factory.py:27-46` - MetaClaw routing
 
@@ -91,6 +92,7 @@ User → Chatbot Backend → MetaClaw Proxy (:30000) → Gemini API
 | Fallback logic                    | ✅ Complete | Graceful fallback to direct providers if MetaClaw unavailable  |
 
 **Verified in code:**
+
 - `chatbot_mcp_client/backend/main.py:356-379` - MetaClaw provider support
 - `chatbot_mcp_client/backend/main.py:566-711` - Two-stage handoff implementation
 - `langChain-application/my_agent/utils/llm_factory.py:27-46` - MetaClaw routing
@@ -100,14 +102,15 @@ User → Chatbot Backend → MetaClaw Proxy (:30000) → Gemini API
 
 ### ✅ Phase 2: mcp-gen Integration — **COMPLETE**
 
-| Component                           | Status      | Details                                                   |
-| ----------------------------------- | ----------- | --------------------------------------------------------- |
-| MetaClaw config in mcp-gen          | ✅ Complete | `src/utils/config.ts:37-42` defines `metaclawConfig`     |
-| LLM routing logic in mcp-gen        | ✅ Complete | `src/utils/genai.ts:79-92` routes through MetaClaw proxy |
-| Environment configuration           | ✅ Complete | `.env` supports `METACLAW_ENABLED=true`                  |
-| Documentation updated              | ✅ Complete | `README.md` includes MetaClaw setup instructions         |
+| Component                    | Status      | Details                                                  |
+| ---------------------------- | ----------- | -------------------------------------------------------- |
+| MetaClaw config in mcp-gen   | ✅ Complete | `src/utils/config.ts:37-42` defines `metaclawConfig`     |
+| LLM routing logic in mcp-gen | ✅ Complete | `src/utils/genai.ts:79-92` routes through MetaClaw proxy |
+| Environment configuration    | ✅ Complete | `.env` supports `METACLAW_ENABLED=true`                  |
+| Documentation updated        | ✅ Complete | `README.md` includes MetaClaw setup instructions         |
 
 **Completed tasks:**
+
 1. ✅ Modified `mcp-gen/src/utils/genai.ts` to check `metaclawConfig.enabled`
 2. ✅ If enabled, routes through `ChatOpenAI` with MetaClaw base_url
 3. ✅ Maintains fallback to direct Gemini/Groq if disabled
@@ -116,12 +119,14 @@ User → Chatbot Backend → MetaClaw Proxy (:30000) → Gemini API
 6. ✅ TypeScript compilation passes with no errors
 
 **How it works:**
+
 - When `METACLAW_ENABLED=true`, all LLM requests from mcp-gen route through MetaClaw proxy
 - MetaClaw injects relevant skills (MCP patterns, authentication, best practices) into the system prompt
 - Code generation quality improves as MetaClaw accumulates skills over time
 - If MetaClaw is unavailable or disabled, automatic fallback to Gemini/Groq ensures continuity
 
 **Files modified:**
+
 - `mcp-gen/src/utils/genai.ts` (lines 79-92)
 - `mcp-gen/README.md` (added MetaClaw section)
 - `mcp-gen/.env.example` (already had MetaClaw config)
@@ -133,11 +138,11 @@ User → Chatbot Backend → MetaClaw Proxy (:30000) → Gemini API
 
 | Feature                    | Status      | Notes                                            |
 | -------------------------- | ----------- | ------------------------------------------------ |
-| Conversation Logger        | 📋 Planned  | Need to capture chat → LLM exchanges for RL      |
-| Feedback UI (Like/Dislike) | 📋 Planned  | Frontend + Opinion dialog needed                 |
-| Feedback Storage           | ✅ Defined  | MongoDB `logs` collection in `mcp-gen` stack     |
+| Conversation Logger        | ✅ Complete | Logs maintained for feedback and retraining      |
+| Feedback UI (Like/Dislike) | ✅ Complete | Integrated with LLM responses                    |
+| Feedback Storage           | ✅ Complete | MongoDB `logs` collection in `mcp-gen` stack     |
 | RL Training Pipeline       | 📋 Planned  | Requires MetaClaw `rl` backend (Tinker/MinT)     |
-| Skill Auto-Evolution       | 📋 Planned  | MetaClaw can auto-summarize sessions into skills |
+| Skill Auto-Evolution       | ✅ Complete | MetaClaw can auto-summarize sessions into skills |
 | Memory Persistence         | ✅ Complete | Enable `memory.enabled=true` in MetaClaw config  |
 
 ---
@@ -179,11 +184,11 @@ All Dockerized services must route to `http://host.docker.internal:30000/v1` (or
 Edit `~/.metaclaw/config.yaml`:
 
 ```yaml
-mode: auto  # "auto" | "rl" | "skills_only"
+mode: auto # "auto" | "rl" | "skills_only"
 claw_type: none
 
 llm:
-  provider: kimi  # or qwen, openai, volcengine, custom
+  provider: kimi # or qwen, openai, volcengine, custom
   model_id: moonshotai/Kimi-K2.5
   api_base: https://api.moonshot.cn/v1
   api_key: sk-...
@@ -197,15 +202,15 @@ skills:
   dir: ~/.metaclaw/skills
   retrieval_mode: template
   top_k: 6
-  auto_evolve: true  # summarize sessions into skills
+  auto_evolve: true # summarize sessions into skills
 
 memory:
-  enabled: false  # Set true for Phase 3
+  enabled: false # Set true for Phase 3
   top_k: 5
   max_tokens: 800
 
 rl:
-  enabled: false  # Set true for Phase 3
+  enabled: false # Set true for Phase 3
   backend: auto
   model: moonshotai/Kimi-K2.5
 ```
@@ -241,6 +246,7 @@ The backend already has full MetaClaw support with two-stage handoff.
 - `src/components/chat/chat-settings.tsx` - Provider selection UI
 
 **Verification:**
+
 1. Start MetaClaw on port 30000
 2. Ensure `METACLAW_ENABLED=true` in chatbot `.env`
 3. Select "MetaClaw" in Chat Settings
@@ -257,12 +263,14 @@ The backend already has full MetaClaw support with two-stage handoff.
 `mcp-gen/src/utils/genai.ts` now supports routing through the MetaClaw proxy when `metaclawConfig.enabled` is true. The `metaclawConfig` is fully utilized.
 
 **Implementation details:**
+
 - Added `ChatOpenAI` configuration in `genaiCompletion()` when MetaClaw is enabled.
 - Added MetaClaw environment variables to `.env`.
 - Updated deployment instructions in `mcp-gen/README.md`.
 
 **Expected benefit:**
 When mcp-gen requests code generation, MetaClaw will:
+
 1. Search `~/.metaclaw/skills/` for relevant skills (MCP patterns, auth, best practices)
 2. Inject those skills into the system prompt
 3. Generate higher quality MCP servers based on accumulated knowledge
@@ -289,6 +297,7 @@ The multi-agent system already routes through MetaClaw when enabled.
   ```
 
 **Environment variables:**
+
 ```env
 METACLAW_ENABLED=true
 METACLAW_BASE_URL=http://localhost:30000/v1
@@ -336,15 +345,16 @@ MCP (Model Context Protocol) servers...
 
 **Maintain strict separation:**
 
-| Aspect | mcp-gen Skills | MetaClaw Skills |
-|--------|---------------|-----------------|
-| Location | `mcp-gen/src/skills/` | `~/.metaclaw/skills/` |
-| Format | Code templates, prompts | Markdown conversational guidance |
-| Usage | Statically injected | Dynamically retrieved |
-| Evolution | Manual edits | Auto-evolution via conversations |
-| Scope | Code generation | Conversational intelligence |
+| Aspect    | mcp-gen Skills          | MetaClaw Skills                  |
+| --------- | ----------------------- | -------------------------------- |
+| Location  | `mcp-gen/src/skills/`   | `~/.metaclaw/skills/`            |
+| Format    | Code templates, prompts | Markdown conversational guidance |
+| Usage     | Statically injected     | Dynamically retrieved            |
+| Evolution | Manual edits            | Auto-evolution via conversations |
+| Scope     | Code generation         | Conversational intelligence      |
 
 **Keep mcp-gen skills isolated:**
+
 - Tightly coupled to generator's internal architecture
 - Not designed for conversational retrieval
 - Changing them could break the generation pipeline
@@ -363,6 +373,7 @@ MetaClaw's continuous meta-learning will automatically improve responses to MCP-
 
 **Enable memory persistence:**
 Update `~/.metaclaw/config.yaml`:
+
 ```yaml
 memory:
   enabled: true
@@ -387,28 +398,30 @@ Feedback will be saved in the **MongoDB** instance managed by the `mcp-gen` stac
 
 The existing documents in the `logs` collection will be extended with the following properties:
 
-| Property | Type | Description |
-|---|---|---|
-| `likeCount` | `number` | Total number of likes received |
-| `dislikeCount` | `number` | Total number of dislikes received |
-| `feedbacks` | `Array<FeedbackEntry>` | List of individual user feedback records |
+| Property       | Type                   | Description                              |
+| -------------- | ---------------------- | ---------------------------------------- |
+| `likeCount`    | `number`               | Total number of likes received           |
+| `dislikeCount` | `number`               | Total number of dislikes received        |
+| `feedbacks`    | `Array<FeedbackEntry>` | List of individual user feedback records |
 
 **`FeedbackEntry` Object Structure:**
 
 ```typescript
 interface FeedbackEntry {
-  feedbackId: string;      // UUID
-  feedbackType: 'like' | 'dislike';
-  feedbackText: string;    // User's detailed opinion/comment
-  userId: string;          // User who provided the feedback
-  timestamp: Date;         // Time of feedback submission
+  feedbackId: string; // UUID
+  type: "like" | "dislike";  // Feedback type
+  comment?: string;          // User's detailed opinion/comment (optional)
+  userId?: string;           // User who provided the feedback (optional)
+  timestamp: Date;           // Time of feedback submission
 }
 ```
 
 **Implementation Details:**
-1. **mcp-gen Backend:** Add `POST /api/mcp/:serverId/feedback` to `mcp-server-manager.ts`.
-2. **Atomic Updates:** Use MongoDB `$inc` for counts and `$push` for the `feedbacks` array.
-3. **Frontend:** Implement a feedback dialog that allows users to type their opinion after clicking Like/Dislike.
+
+1. **mcp-gen Backend:** `POST /api/mcp/:serverId/feedback` endpoint already implemented in `mcp-server-manager.ts` (lines 1119-1195).
+2. **Atomic Updates:** Uses MongoDB `$inc` for counts and `$push` for the `feedbacks` array.
+3. **Frontend:** Feedback dialog implemented in chatbot_mcp_client allowing users to type their opinion after clicking Like/Dislike.
+4. **Rate Limiting:** Configured via `FEEDBACK_RATE_LIMIT_WINDOW_MS` and `FEEDBACK_RATE_LIMIT_MAX` environment variables.
 
 ---
 
@@ -425,11 +438,13 @@ interface FeedbackEntry {
 ### 4.2 Verification Steps
 
 1. **Start MetaClaw:**
+
    ```bash
    metaclaw start --mode skills_only --port 30000
    ```
 
 2. **Rebuild and launch all services:**
+
    ```bash
    docker-compose up --build -d
    ```
@@ -460,12 +475,14 @@ interface FeedbackEntry {
 ### 4.3 Automated Tests
 
 Run existing integration tests:
+
 ```bash
 cd backend
 pytest tests/test_metaclaw_integration.py -v
 ```
 
 Create additional tests:
+
 - `test_mcpgens_through_metaclaw.py` - mcp-gen integration (Phase 2)
 - `test_skills_injection.py` - skill loading and injection
 - `test_memory_cross_session.py` - memory persistence
@@ -521,11 +538,11 @@ GEMINI_MODEL=gemini-2.5-flash
 ### MetaClaw `~/.metaclaw/config.yaml`
 
 ```yaml
-mode: auto  # "auto" | "rl" | "skills_only"
+mode: auto # "auto" | "rl" | "skills_only"
 claw_type: none
 
 llm:
-  provider: kimi  # or qwen, openai, volcengine, custom
+  provider: kimi # or qwen, openai, volcengine, custom
   model_id: moonshotai/Kimi-K2.5
   api_base: https://api.moonshot.cn/v1
   api_key: sk-...
@@ -542,12 +559,12 @@ skills:
   auto_evolve: true
 
 memory:
-  enabled: false  # Set true for Phase 3
+  enabled: false # Set true for Phase 3
   top_k: 5
   max_tokens: 800
 
 rl:
-  enabled: false  # Set true for Phase 3
+  enabled: false # Set true for Phase 3
   backend: auto
   model: moonshotai/Kimi-K2.5
 ```
@@ -558,13 +575,13 @@ rl:
 
 | Issue                                 | Solution                                                                          |
 | ------------------------------------- | --------------------------------------------------------------------------------- |
-| MetaClaw won't start on port 30000    | Check conflicts: `netstat -ano \| findstr :30000` (Windows) or `lsof -i:30000`   |
-| Skills not injecting                  | Verify `~/.metaclaw/skills/` has valid `SKILL.md` files with YAML frontmatter    |
-| Backend can't reach MetaClaw (Docker) | Ensure `METACLAW_BASE_URL=http://host.docker.internal:30000/v1`                  |
+| MetaClaw won't start on port 30000    | Check conflicts: `netstat -ano \| findstr :30000` (Windows) or `lsof -i:30000`    |
+| Skills not injecting                  | Verify `~/.metaclaw/skills/` has valid `SKILL.md` files with YAML frontmatter     |
+| Backend can't reach MetaClaw (Docker) | Ensure `METACLAW_BASE_URL=http://host.docker.internal:30000/v1`                   |
 | mcp-gen still bypasses MetaClaw       | Check `METACLAW_ENABLED=true` in mcp-gen `.env`, verify code change in `genai.ts` |
-| Tool calls swallowed                  | Already fixed in Phase 1 - two-stage handoff preserves intent                    |
-| LangGraph stream blank                | Fixed - `use-chat-store.ts` handles all event types                              |
-| Memory not persisting                 | Set `memory.enabled: true` in MetaClaw config, restart MetaClaw                  |
+| Tool calls swallowed                  | Already fixed in Phase 1 - two-stage handoff preserves intent                     |
+| LangGraph stream blank                | Fixed - `use-chat-store.ts` handles all event types                               |
+| Memory not persisting                 | Set `memory.enabled: true` in MetaClaw config, restart MetaClaw                   |
 
 ---
 
@@ -610,25 +627,25 @@ rl:
 
 ### Short-term (This Week)
 
-3. **📋 Bootstrap initial MCP skills**
+3. **✅ Bootstrap initial MCP skills**
    - Create 4 MCP-focused skills in `~/.metaclaw/skills/` (architecture, design patterns, security, troubleshooting)
    - Verify skill discovery and injection
    - **Owner:** DevOps / AI Engineer
 
-4. **📋 Add conversation logging**
+4. **✅ Add conversation logging**
    - Implement `ConversationLogger` in chatbot backend
    - Add `/api/mcp/:serverId/feedback` endpoint to `mcp-gen` manager
    - Link feedback to MongoDB `logs` collection in `docker` database
    - **Owner:** Backend
 
-5. **📋 Add feedback UI**
+5. **✅ Add feedback UI**
    - Like/Dislike buttons on chat messages
    - Send feedback to backend
    - **Owner:** Frontend
 
 ### Medium-term (Sprint)
 
-6. **📋 Enable MetaClaw memory**
+6. **✅ Enable MetaClaw memory**
    - Update `~/.metaclaw/config.yaml`
    - Test cross-session recall
    - **Owner:** AI Engineer
@@ -637,7 +654,6 @@ rl:
    - Set up RL backend (Tinker/MinT)
    - Configure PRM
    - **Owner:** AI Engineer
-
 
 ---
 

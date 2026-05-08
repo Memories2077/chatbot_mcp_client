@@ -6,7 +6,7 @@ Eliminates scattered os.getenv() calls throughout the codebase.
 """
 import os
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 
 @dataclass
@@ -22,7 +22,7 @@ class LLMConfig:
     # MetaClaw proxy configuration
     metaclaw_enabled: bool
     metaclaw_base_url: str
-    metaclaw_api_key: str
+    metaclaw_api_key: Optional[str]
     metaclaw_model: str
     metaclaw_top_p: float
     metaclaw_max_tokens: int
@@ -31,9 +31,10 @@ class LLMConfig:
     default_temperature: float
     default_timeout_ms: int
 
-    # Backend settings
+    # Backend/container settings
     backend_port: int
     langgraph_api_url: str
+    mcp_gen_base_url: str
 
     # MCP settings
     mcp_connection_timeout: float
@@ -48,18 +49,28 @@ class LLMConfig:
     @classmethod
     def from_env(cls) -> "LLMConfig":
         """Load configuration from environment variables"""
-        # Backend port with validation
+        # Backend port with validation. Prefer backend-only BACKEND_PORT;
+        # keep NEXT_PUBLIC_BACKEND_PORT as a temporary compatibility fallback.
         try:
-            backend_port = int(os.getenv("NEXT_PUBLIC_BACKEND_PORT", "8000"))
+            backend_port = int(
+                os.getenv("BACKEND_PORT")
+                or os.getenv("NEXT_PUBLIC_BACKEND_PORT")
+                or "8000"
+            )
         except (ValueError, TypeError):
             backend_port = 8000
 
-        # LangGraph API URL with Docker fallback
+        # LangGraph is a backend-to-backend dependency. Prefer backend-only
+        # LANGGRAPH_API_URL; keep NEXT_PUBLIC_LANGGRAPH_API_URL only as a
+        # temporary compatibility fallback for older local env files.
         langgraph_url = (
-            os.getenv("NEXT_PUBLIC_LANGGRAPH_API_URL")
-            or os.getenv("LANGGRAPH_API_URL")
+            os.getenv("LANGGRAPH_API_URL")
+            or os.getenv("NEXT_PUBLIC_LANGGRAPH_API_URL")
             or "http://localhost:2024"
         )
+
+        # mcp-gen manager URL as seen by the FastAPI backend/container.
+        mcp_gen_url = os.getenv("MCP_GEN_URL", "http://localhost:8080")
 
         # Build configuration
         config = cls(
@@ -82,9 +93,10 @@ class LLMConfig:
             default_temperature=float(os.getenv("LLM_TEMPERATURE", "0.0")),
             default_timeout_ms=int(os.getenv("LLM_TIMEOUT_MS", "300000")),
 
-            # Backend settings
+            # Backend/container settings
             backend_port=backend_port,
             langgraph_api_url=langgraph_url,
+            mcp_gen_base_url=mcp_gen_url.rstrip("/"),
 
             # MCP settings
             mcp_connection_timeout=float(os.getenv("MCP_CONNECTION_TIMEOUT", "10.0")),
@@ -106,7 +118,7 @@ class LLMConfig:
 
         return config
 
-    def get_llm_provider(self, provider_override: str = None) -> str:
+    def get_llm_provider(self, provider_override: Optional[str] = None) -> str:
         """Get the effective provider to use"""
         if provider_override:
             return provider_override
@@ -126,6 +138,22 @@ class LLMConfig:
             "top_p": self.metaclaw_top_p,
             "max_tokens": self.metaclaw_max_tokens,
         }
+
+
+    def get_configured_fallbacks(self) -> List[str]:
+        """Return direct/fallback providers with API keys configured."""
+        fallbacks: List[str] = []
+        if self.gemini_api_key:
+            fallbacks.append("gemini")
+        if self.groq_api_key:
+            fallbacks.append("groq")
+        return fallbacks
+
+    def get_effective_provider(self, requested_provider: Optional[str] = None) -> str:
+        """Return provider after MetaClaw proxy routing policy is applied."""
+        if self.is_metaclaw_enabled():
+            return "metaclaw"
+        return requested_provider or self.default_provider
 
 
 # Global configuration instance (loaded once at module import)

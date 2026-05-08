@@ -3,7 +3,7 @@
  * Handles communication with the mcp-gen service for server listing and feedback.
  */
 
-const MCP_GEN_BASE_URL = process.env.NEXT_PUBLIC_MCP_GEN_URL || 'http://localhost:8080';
+import { BACKEND_API } from "@/lib/config";
 
 export interface McpServerApi {
   serverId: string;
@@ -23,7 +23,7 @@ export interface McpServerApi {
   dislikeCount: number;
   feedbacks: Array<{
     feedbackId: string;
-    type: 'like' | 'dislike';
+    type: "like" | "dislike";
     userId?: string;
     comment?: string;
     timestamp: string;
@@ -39,18 +39,20 @@ export interface FeedbackResponse {
 }
 
 /**
- * Fetch all MCP servers from mcp-gen
+ * Fetch all MCP servers through FastAPI's mcp-gen proxy.
  */
 export async function fetchMcpServers(): Promise<McpServerApi[]> {
-  const response = await fetch(`${MCP_GEN_BASE_URL}/api/mcp/servers`, {
-    method: 'GET',
+  const response = await fetch(BACKEND_API.mcpServers(), {
+    method: "GET",
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     },
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Failed to fetch MCP servers' }));
+    const error = await response
+      .json()
+      .catch(() => ({ error: "Failed to fetch MCP servers" }));
     throw new Error(error.error || `HTTP ${response.status}`);
   }
 
@@ -59,18 +61,18 @@ export async function fetchMcpServers(): Promise<McpServerApi[]> {
 }
 
 /**
- * Submit feedback for an MCP server
+ * Submit feedback for an MCP server through FastAPI's mcp-gen proxy.
  */
 export async function submitMcpServerFeedback(
   serverId: string,
-  type: 'like' | 'dislike',
+  type: "like" | "dislike",
   userId?: string,
-  comment?: string
+  comment?: string,
 ): Promise<FeedbackResponse> {
-  const response = await fetch(`${MCP_GEN_BASE_URL}/api/mcp/${serverId}/feedback`, {
-    method: 'POST',
+  const response = await fetch(BACKEND_API.mcpFeedback(serverId), {
+    method: "POST",
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
       type,
@@ -80,7 +82,9 @@ export async function submitMcpServerFeedback(
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Failed to submit feedback' }));
+    const error = await response
+      .json()
+      .catch(() => ({ error: "Failed to submit feedback" }));
     throw new Error(error.error || `HTTP ${response.status}`);
   }
 

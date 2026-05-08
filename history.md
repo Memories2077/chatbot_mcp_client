@@ -1,3 +1,47 @@
+## [2026-05-08] Docker Runtime Configuration, MetaClaw Proxy, and MCP Feedback Integration
+
+### Overview
+
+Updated the application stack to make local and Docker deployments more consistent, route browser-facing MCP server feedback through the FastAPI backend, and align MetaClaw proxy configuration across environment examples, backend settings, frontend configuration, and documentation. Also cleaned up outdated planning/completion documents in favor of the current synchronized integration docs and change plan.
+
+### Changes
+
+#### Runtime and Docker Configuration
+
+- Reworked environment variable guidance in `.env.example` to clearly separate browser-safe `NEXT_PUBLIC_*` values from backend/container-only settings.
+- Added explicit backend, LangGraph, mcp-gen, CORS, provider, and MetaClaw configuration examples.
+- Updated `docker-compose.yml` and `Dockerfile.frontend` for clearer service runtime behavior and frontend/backend connectivity.
+- Refreshed Docker documentation in `docs/DOCKER.md` to match the current multi-service deployment model.
+
+#### Backend Integration
+
+- Extended `backend/config.py` with synchronized MetaClaw and mcp-gen configuration fields.
+- Updated `backend/main.py` to support backend proxy routes for MCP server listing and feedback submission.
+- Improved MetaClaw request handling in `backend/metaclaw_client.py`, including proxy-oriented defaults and provider behavior alignment.
+
+#### Frontend Integration
+
+- Updated `src/lib/config.ts` to centralize backend API endpoint construction.
+- Changed `src/lib/mcp-server-api.ts` so MCP server list and feedback requests go through FastAPI instead of direct browser calls to mcp-gen.
+- Improved chat store streaming/error handling formatting in `src/lib/hooks/use-chat-store.ts`.
+- Updated `src/components/layout/RightUtilityPanel.tsx` to consume the proxied MCP server feedback flow.
+
+#### Documentation and Plans
+
+- Updated `README.md` and `docs/METACLAW_INTEGRATION_SYNCED.md` with the current configuration and integration model.
+- Removed obsolete execution/completion documents that no longer represent the active implementation state.
+- Added the current change plan under `plans/` for traceability.
+
+### Result
+
+- ✅ Browser-safe frontend configuration is separated from backend-only runtime settings.
+- ✅ MCP server list and feedback traffic is consistently proxied through FastAPI.
+- ✅ Docker and local development documentation better match the current service architecture.
+- ✅ MetaClaw proxy settings are aligned across backend configuration and documentation.
+- ✅ Obsolete docs were removed to reduce confusion.
+
+---
+
 ## [2026-04-28] Critical Bug Fixes: SSE Streaming, Race Conditions, and Error Handling
 
 ### Overview
@@ -9,33 +53,21 @@ Fixed multiple critical production bugs that were causing data loss, race condit
 Comprehensive code review identified 12 issues across severity levels:
 
 **CRITICAL:**
+
 1. **SSE streaming parser loses content** - Frontend didn't buffer chunked data lines, causing missing text in responses
 2. **CORS too permissive** - `allow_origins=["*"]` with credentials allowed any origin (security vulnerability)
 3. **Hardcoded placeholder API key** - MetaClaw default `"metaclaw"` could be accidentally used in production
 
-**HIGH:**
-4. Redundant agent creation + state race condition
-5. System prompt mentions unavailable `create_mcp_server` tool for standard agents
-6. MCP connection failures silently ignored by users
-7. `normalize_docker_urls_in_dict` mutates input dict
-8. Frontend error handling lost error context (used `any`)
-9. Backend agent state shared globally causing potential issues
-10. Silent exceptions in agent attribute attachment
-11. Sensitive data logged (MongoDB connection string)
+**HIGH:** 4. Redundant agent creation + state race condition 5. System prompt mentions unavailable `create_mcp_server` tool for standard agents 6. MCP connection failures silently ignored by users 7. `normalize_docker_urls_in_dict` mutates input dict 8. Frontend error handling lost error context (used `any`) 9. Backend agent state shared globally causing potential issues 10. Silent exceptions in agent attribute attachment 11. Sensitive data logged (MongoDB connection string)
 
-**MEDIUM:**
-12. Exit stack cleanup swallowed exceptions
-13. Hardcoded timeouts and retries
-14. Database index creation could fail silently
-15. Large functions (>50 lines) reducing maintainability
-16. Race condition in MongoDB connection singleton
-17. Console.error in production code
+**MEDIUM:** 12. Exit stack cleanup swallowed exceptions 13. Hardcoded timeouts and retries 14. Database index creation could fail silently 15. Large functions (>50 lines) reducing maintainability 16. Race condition in MongoDB connection singleton 17. Console.error in production code
 
 ### Changes
 
 #### `src/lib/hooks/use-chat-store.ts`
 
 **Fixed CRITICAL SSE streaming bug:**
+
 - Added buffer management using `useRef` to accumulate chunks that split mid-line
 - Properly split on `\n\n` while preserving incomplete last line
 - Flush remaining buffer when stream ends to capture final data
@@ -52,66 +84,79 @@ bufferRef.current = lines.pop() || "";
 ```
 
 **Polish:**
+
 - Added `logError` wrapper to avoid `console.error` in production (can integrate monitoring service)
 
 #### `backend/main.py`
 
 **Agent factory refactor (Issue #3 - race condition):**
+
 - Modified `_stream_standard_agent_response` to accept optional `agent` parameter
 - Chat endpoint now passes pre-created agent, avoiding double creation
 - Eliminated redundant state reads by using passed parameters
 
 **System prompt fix (Issue #2):**
+
 - Updated `get_system_prompt` to accept `has_create_mcp_server_tool: bool`
 - Standard agents no longer mention unavailable `create_mcp_server` tool
 - Separated tool-specific rules into explicit parameter
 
 **MCP failure warnings (Issue #4):**
+
 - Track failed MCP URLs in `failed_urls` list during connection attempts
 - Attach failures to agent object (with debug logging on failure)
 - Emit user-visible warning in streaming response when MCP servers fail to connect
 
 **Configurable timeouts (Issues #9, #13):**
+
 - Added `MCP_CONNECTION_RETRIES` (default 3)
 - Added `MCP_RETRY_DELAY` (default 2 seconds)
 - Replaced all hardcoded `10.0` timeouts with `llm_config` values
 - Updated `/mcp/metadata` endpoint to use configurable timeouts
 
 **Exit stack cleanup (Issue #8):**
+
 - Changed bare `except: pass` to `except Exception as e: logger.debug(...)`
 - Improved shutdown logging to show warning instead of silently ignoring
 
 **Security fixes (CRITICAL Issues #2, #3):**
+
 - Replaced `allow_origins=["*"]` with configurable `ALLOWED_ORIGINS` env var (defaults to `http://localhost:9002`)
 - Added startup validation: if `METACLAW_ENABLED=true` but `METACLAW_API_KEY` not set, raises `ValueError`
 
 **Silent exception logging:**
+
 - Fixed two `except: pass` blocks to log at DEBUG level
 
 #### `backend/shared.py`
 
 **Immutability fix (Issue #5):**
+
 - Rewrote `normalize_docker_urls_in_dict` to create new dict recursively instead of mutating input
 - Function signature unchanged, behavior now pure
 
 #### `backend/database.py`
 
 **Logging standardization (Issue #11):**
+
 - Imported `loguru.logger`
 - Replaced all `print()` with appropriate `logger` calls
 - Changed index creation exception from warning to error (fail fast)
 
 **Security fix (CRITICAL Issue #11):**
+
 - Removed sensitive MongoDB connection URL from logs
 - Now logs only database name, not full connection string
 
 **Race condition fix (Issue #16):**
+
 - Added class-level `asyncio.Lock()` to prevent concurrent initialization
 - Made `connect()` properly idempotent under lock
 
 #### `backend/config.py`
 
 **Configuration validation (CRITICAL):**
+
 - Removed placeholder default for `metaclaw_api_key` (was `"metaclaw"`)
 - Added validation in `from_env()`: raises `ValueError` if MetaClaw enabled without API key
 - Added new configuration fields:
@@ -142,12 +187,14 @@ bufferRef.current = lines.pop() || "";
 ### Testing Performed
 
 **Manual verification:**
+
 - ✅ SSE buffer fix tested with simulated chunked responses
 - ✅ Error handling verified with TypeScript type checking
 - ✅ Immutability verified via code inspection
 - ✅ CORS configuration tested with allowed origins
 
 **Remaining tests (TDD requirement):**
+
 - Unit test for SSE buffer logic (multi-chunk line scenarios)
 - Unit test for `normalize_docker_urls_in_dict` immutability with nested dicts
 - Unit test for `get_system_prompt` with/without `create_mcp_server` rule
@@ -172,6 +219,7 @@ Applied comprehensive code review fixes to productionize the backend codebase. A
 ### Problem Context
 
 Code review identified multiple issues:
+
 - **Async generator bug**: `_execute_with_gemini` collected SSE chunks into a string instead of streaming
 - **Code duplication**: Identical tool definitions, extraction functions, and LangGraph streaming logic duplicated across files
 - **Resource leak**: LangGraph client never closed, leaking connections
@@ -242,6 +290,7 @@ Implemented intelligent MCP server selection with MetaClaw as the centralized de
 ### Problem Context
 
 When `METACLAW_ENABLED=true`, all requests were routed through MetaClaw, but the backend still connected to user-provided MCP servers and passed their tools to the agent. This created a mismatch:
+
 - MetaClaw received full conversation + MCP tool context
 - MetaClaw always attempted to build a new MCP server via LangGraph (due to seeing tool-bound agents)
 - User-provided MCP servers were never actually used
@@ -249,10 +298,12 @@ When `METACLAW_ENABLED=true`, all requests were routed through MetaClaw, but the
 ### Solution
 
 Gave MetaClaw reasoning ability through a clear system prompt and two distinct tool calls:
+
 - `use_mcp_tools`: Signals to use the already-connected MCP servers
 - `create_mcp_server`: Signals to build a new MCP server via LangGraph
 
 MetaClaw now decides based on user intent:
+
 - User wants to use existing API tools → calls `use_mcp_tools`
 - User wants a new MCP server built → calls `create_mcp_server`
 - Casual chat → no tool call, routes to fallback LLM
@@ -290,7 +341,6 @@ MetaClaw now decides based on user intent:
 - `history.md` (this file)
 
 ---
-
 
 ## [2026-04-27] Bug Fix: MetaClaw Client ChatOpenAI Initialization
 

@@ -4,11 +4,12 @@ import json
 import re
 import logging
 from contextlib import AsyncExitStack
-from typing import Optional, List, Dict, Any, AsyncGenerator, Union
+from typing import Optional, List, Dict, Any, AsyncGenerator, Union, cast
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+import requests
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
@@ -60,13 +61,13 @@ class ChatRequest(BaseModel):
 
 class AgentState:
     def __init__(self):
-        self.agent = None
-        self.metaclaw_client = None  # For MetaClaw client wrapper
-        self.exit_stacks = []
-        self.current_provider = None
-        self.current_model = None
-        self.current_mcp_urls = []
-        self.current_temperature = None
+        self.agent: Optional[Any] = None
+        self.metaclaw_client: Optional[MetaClawClient] = None  # For MetaClaw client wrapper
+        self.exit_stacks: List[AsyncExitStack] = []
+        self.current_provider: Optional[str] = None
+        self.current_model: Optional[str] = None
+        self.current_mcp_urls: List[str] = []
+        self.current_temperature: Optional[float] = None
         self.lock = asyncio.Lock()
 
 state = AgentState()
@@ -126,6 +127,31 @@ def resolve_docker_url(url: str) -> str:
     return url
 
 
+def sse_event(payload: Dict[str, Any]) -> str:
+    """Format a typed SSE data payload."""
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+def sse_content(content: str) -> str:
+    """Emit a typed content event while remaining backward compatible."""
+    return sse_event({"type": "content", "content": content})
+
+
+def sse_error(error: str) -> str:
+    """Emit a typed error event while remaining backward compatible."""
+    return sse_event({"type": "error", "error": error})
+
+
+def sse_status(message: str) -> str:
+    """Emit a typed status event."""
+    return sse_event({"type": "status", "message": message})
+
+
+def sse_done() -> str:
+    """Emit the typed done event plus legacy [DONE] sentinel."""
+    return f"data: {json.dumps({'type': 'done'})}\n\ndata: [DONE]\n\n"
+
+
 @app.get("/health")
 async def health_check():
     try:
@@ -133,15 +159,31 @@ async def health_check():
         has_gemini = bool(llm_config.gemini_api_key)
         has_groq = bool(llm_config.groq_api_key)
         has_metaclaw = llm_config.metaclaw_enabled and bool(llm_config.metaclaw_api_key)
+        configured_fallbacks = llm_config.get_configured_fallbacks()
+        effective_provider = llm_config.get_effective_provider()
 
         if not (has_gemini or has_groq or has_metaclaw):
             return {
                 "status": "unhealthy",
+                "service": "backend",
+                "metaclawEnabled": llm_config.metaclaw_enabled,
+                "effectiveProvider": effective_provider,
+                "configuredFallbacks": configured_fallbacks,
+                "langgraphApiUrl": llm_config.langgraph_api_url,
+                "mcpGenUrl": llm_config.mcp_gen_base_url,
                 "detail": "No API keys configured. Set GEMINI_API_KEY, GROQ_API_KEY, or METACLAW_ENABLED=true with METACLAW_API_KEY."
             }
-        return {"status": "healthy", "service": "backend"}
+        return {
+            "status": "healthy",
+            "service": "backend",
+            "metaclawEnabled": llm_config.metaclaw_enabled,
+            "effectiveProvider": effective_provider,
+            "configuredFallbacks": configured_fallbacks,
+            "langgraphApiUrl": llm_config.langgraph_api_url,
+            "mcpGenUrl": llm_config.mcp_gen_base_url,
+        }
     except Exception as e:
-        return {"status": "unhealthy", "detail": str(e)}
+        return {"status": "unhealthy", "service": "backend", "detail": str(e)}
 
 
 async def get_or_create_agent(
@@ -189,10 +231,11 @@ async def get_or_create_agent(
             api_key = llm_config.groq_api_key
             if not api_key:
                 raise Exception("GROQ_API_KEY not found for Groq provider.")
-            llm = ChatGroq(
-                model_name=model_name,
+            chat_groq_factory = cast(Any, ChatGroq)
+            llm = chat_groq_factory(
+                model=model_name,
                 temperature=temperature,
-                api_key=api_key
+                api_key=api_key,
             )
         elif provider == "metaclaw":
             # Use MetaClaw client wrapper
@@ -255,15 +298,17 @@ async def get_or_create_agent(
 
     if all_tools:
         logger.info("Using agent with MCP tools")
-        state.agent = create_agent(llm, all_tools)
+        created_agent: Any = create_agent(llm, all_tools)
     else:
         logger.info("No MCP tools provided, using basic model")
-        state.agent = llm
+        created_agent = llm
+
+    state.agent = created_agent
 
     # Attach MCP failure information to agent for user warning
     if failed_urls:
         try:
-            state.agent._mcp_failures = failed_urls
+            setattr(created_agent, "_mcp_failures", failed_urls)
         except Exception as e:
             logger.debug(f"Could not attach _mcp_failures to agent: {e}")
 
@@ -271,7 +316,7 @@ async def get_or_create_agent(
     state.current_model = model_name
     state.current_mcp_urls = mcp_urls.copy()
     state.current_temperature = temperature
-    return state.agent
+    return created_agent
 
 
 def get_system_prompt(
@@ -338,15 +383,78 @@ async def get_mcp_metadata(request: McpMetadataRequest):
             init_result = await asyncio.wait_for(session.initialize(), timeout=llm_config.mcp_initialization_timeout)
             server_name = init_result.serverInfo.name if hasattr(init_result, 'serverInfo') else "Unknown Server"
             return {"name": server_name, "url": original_url, "status": "connected"}
+    except asyncio.TimeoutError as e:
+        logger.error(f"Timed out fetching metadata for {url}: {e}", exc_info=True)
+        return {
+            "name": original_url.split('/')[-1] or "External Server",
+            "url": original_url,
+            "status": "error",
+            "errorCode": "timeout",
+            "detail": "Timed out while connecting to or initializing the MCP server."
+        }
+    except ValueError as e:
+        logger.error(f"Unsupported MCP transport or invalid URL for {url}: {e}", exc_info=True)
+        return {
+            "name": original_url.split('/')[-1] or "External Server",
+            "url": original_url,
+            "status": "error",
+            "errorCode": "unsupported_transport",
+            "detail": str(e)
+        }
     except Exception as e:
         # Catch all exceptions including TaskGroup errors from anyio
+        error_text = str(e)
+        error_code = "initialization_error" if "initialize" in error_text.lower() else "connect_error"
         logger.error(f"Failed to fetch metadata for {url}: {e}", exc_info=True)
         return {
             "name": original_url.split('/')[-1] or "External Server",
             "url": original_url,
             "status": "error",
-            "detail": str(e)
+            "errorCode": error_code,
+            "detail": error_text
         }
+
+
+@app.get("/mcp/servers")
+async def list_mcp_servers():
+    """Proxy mcp-gen server listing through FastAPI to avoid browser CORS/service-name assumptions."""
+    try:
+        response = await asyncio.to_thread(
+            requests.get,
+            f"{llm_config.mcp_gen_base_url}/api/mcp/servers",
+            timeout=llm_config.default_timeout_ms / 1000,
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as e:
+        logger.error(f"Failed to proxy mcp-gen server list: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=f"mcp-gen server list unavailable: {e}")
+
+
+class McpFeedbackRequest(BaseModel):
+    type: str
+    userId: Optional[str] = None
+    comment: Optional[str] = None
+
+
+@app.post("/mcp/{server_id}/feedback")
+async def submit_mcp_feedback(server_id: str, request: McpFeedbackRequest):
+    """Proxy mcp-gen feedback submission through FastAPI."""
+    if request.type not in {"like", "dislike"}:
+        raise HTTPException(status_code=400, detail="Feedback type must be 'like' or 'dislike'.")
+
+    try:
+        response = await asyncio.to_thread(
+            requests.post,
+            f"{llm_config.mcp_gen_base_url}/api/mcp/{server_id}/feedback",
+            json=request.dict(exclude_none=True),
+            timeout=llm_config.default_timeout_ms / 1000,
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as e:
+        logger.error(f"Failed to proxy mcp-gen feedback for {server_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=f"mcp-gen feedback unavailable: {e}")
 
 
 # ------------------------------------------------------------------ #
@@ -395,7 +503,7 @@ DO NOT respond with text explanations — just trigger the tool and let the syst
 
     except Exception as e:
         err_msg = f"\n\n> [ERROR]: Gemini executor failed: {str(e)}\n\n"
-        yield f"data: {json.dumps({'content': err_msg})}\n\n"
+        yield sse_content(err_msg)
 
 
 
@@ -407,8 +515,13 @@ DO NOT respond with text explanations — just trigger the tool and let the syst
 async def chat_endpoint(request: ChatRequest):
     try:
         # Determine the effective provider and model based on MetaClaw configuration
-        effective_provider = request.provider
-        effective_model = request.model
+        request_provider = request.provider or llm_config.default_provider
+        request_model = request.model or (
+            llm_config.gemini_model if request_provider == "gemini" else llm_config.groq_model
+        )
+        request_temperature = request.temperature if request.temperature is not None else llm_config.default_temperature
+        effective_provider = request_provider
+        effective_model = request_model
 
         if llm_config.is_metaclaw_enabled():
             logger.info("[MetaClaw] MetaClaw enabled in config. Forcing provider to 'metaclaw'.")
@@ -420,7 +533,7 @@ async def chat_endpoint(request: ChatRequest):
             provider=effective_provider,
             model_name=effective_model,
             mcp_urls=request.mcpServers,
-            temperature=request.temperature
+            temperature=request_temperature
         )
 
         # Handle MetaClaw client returned from get_or_create_agent
@@ -430,7 +543,7 @@ async def chat_endpoint(request: ChatRequest):
                 try:
                     async for sse in agent.chat(
                         messages=[{"role": m.role, "content": m.content} for m in request.messages],
-                        temperature=request.temperature,
+                        temperature=request_temperature,
                         langgraph_url=llm_config.langgraph_api_url,
                         mcp_urls=request.mcpServers
                     ):
@@ -446,7 +559,7 @@ async def chat_endpoint(request: ChatRequest):
                                         request=request,
                                         messages=[{"role": m.role, "content": m.content} for m in request.messages],
                                         mcp_urls=request.mcpServers,
-                                        temperature=request.temperature,
+                                        temperature=request_temperature,
                                         state=state
                                     ):
                                         yield std_sse
@@ -456,8 +569,8 @@ async def chat_endpoint(request: ChatRequest):
                             pass
                         yield sse
                 except Exception as e:
-                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
-                    yield "data: [DONE]\n\n"
+                    yield sse_error(str(e))
+                    yield sse_done()
             return StreamingResponse(metaclaw_stream_from_state(), media_type="text/event-stream")
 
         # Standard agent flow (Gemini, Groq) - use helper
@@ -466,7 +579,7 @@ async def chat_endpoint(request: ChatRequest):
                 request=request,
                 messages=[{"role": m.role, "content": m.content} for m in request.messages],
                 mcp_urls=request.mcpServers,
-                temperature=request.temperature,
+                temperature=request_temperature,
                 state=state,
                 agent=agent  # Pass the pre-created agent to avoid double creation
             ),
@@ -491,31 +604,33 @@ async def _stream_standard_agent_response(
     try:
         # Get or create agent with MCP connections handled by factory
         if agent is None:
+            provider = request.provider or llm_config.default_provider
+            default_model = llm_config.gemini_model if provider == "gemini" else llm_config.groq_model
             agent = await get_or_create_agent(
-                provider=request.provider,
-                model_name=request.model,
+                provider=provider,
+                model_name=request.model or default_model,
                 mcp_urls=mcp_urls or [],
                 temperature=temperature
             )
     except Exception as e:
         logger.error(f"[Chat] Agent creation error: {e}")
-        yield f"data: {json.dumps({'error': f'Failed to create agent: {str(e)}'})}\n\n"
-        yield "data: [DONE]\n\n"
+        yield sse_error(f"Failed to create agent: {str(e)}")
+        yield sse_done()
         return
 
     # Detect MetaClaw client explicitly (shouldn't happen in standard flow, but safe)
-    from metaclaw_client import MetaClawClient
     if isinstance(agent, MetaClawClient):
         has_tools = False
     else:
-        has_tools = hasattr(agent, 'tools') and bool(agent.tools)
+        agent_tools = getattr(cast(Any, agent), "tools", None)
+        has_tools = bool(agent_tools)
 
     # Emit warning if MCP servers were requested but failed to connect
     if mcp_urls and hasattr(agent, '_mcp_failures'):
         failures = getattr(agent, '_mcp_failures', [])
         if failures:
             warning_msg = f"> [WARNING]: Failed to connect to MCP servers: {', '.join(failures)}. Proceeding without tool support.\n\n"
-            yield f"data: {json.dumps({'content': warning_msg})}\n\n"
+            yield sse_status(warning_msg)
             # Remove attribute to avoid duplicate warnings if agent is reused
             try:
                 delattr(agent, '_mcp_failures')
@@ -526,7 +641,8 @@ async def _stream_standard_agent_response(
     # Use the passed mcp_urls parameter, not state.current_mcp_urls
     dynamic_prompt = get_system_prompt(has_mcp_tools=has_tools, has_create_mcp_server_tool=False, mcp_urls=mcp_urls or [], last_turn_index=last_turn_index)
 
-    langchain_msgs = [SystemMessage(content=dynamic_prompt)]
+    from langchain_core.messages import BaseMessage
+    langchain_msgs: List[BaseMessage] = [SystemMessage(content=dynamic_prompt)]
     for msg in messages:
         if msg.get("role") == "user":
             langchain_msgs.append(HumanMessage(content=msg.get("content", "")))
@@ -534,17 +650,19 @@ async def _stream_standard_agent_response(
             langchain_msgs.append(AIMessage(content=msg.get("content", "")))
 
     try:
-        if hasattr(agent, "ainvoke"):
+        agent_obj = cast(Any, agent)
+        if hasattr(agent_obj, "ainvoke"):
             if has_tools:
-                response = await agent.ainvoke({"messages": langchain_msgs})
+                response: Any = await agent_obj.ainvoke({"messages": langchain_msgs})
             else:
-                response = await agent.ainvoke(langchain_msgs)
+                response = await agent_obj.ainvoke(langchain_msgs)
         else:
             raise Exception("Agent does not have ainvoke method")
 
         final_content = ""
-        if isinstance(response, dict) and "messages" in response:
-            last_msg = response["messages"][-1]
+        response_obj = cast(Any, response)
+        if isinstance(response_obj, dict) and "messages" in response_obj:
+            last_msg = response_obj["messages"][-1]
 
             # Safety net: catch if provider agent somehow calls create_mcp_server
             requirements = extract_create_mcp_tool_call(last_msg)
@@ -552,17 +670,17 @@ async def _stream_standard_agent_response(
                 logger.warning(f"[Chat] Safety net triggered — provider called create_mcp_server.")
                 async for sse in _execute_build_with_gemini(requirements, temperature):
                     yield sse
-                yield "data: [DONE]\n\n"
+                yield sse_done()
                 return
 
             if hasattr(last_msg, "content"):
                 final_content = last_msg.content
             else:
                 final_content = str(last_msg)
-        elif hasattr(response, "content"):
-            final_content = response.content
+        elif hasattr(response_obj, "content"):
+            final_content = getattr(response_obj, "content")
         else:
-            final_content = str(response)
+            final_content = str(response_obj)
 
         if not isinstance(final_content, str):
             if isinstance(final_content, list):
@@ -573,13 +691,13 @@ async def _stream_standard_agent_response(
                 final_content = json.dumps(final_content, cls=CustomEncoder)
         final_content = re.sub(r'<think>.*?</think>', '', final_content, flags=re.DOTALL).strip()
 
-        yield f"data: {json.dumps({'content': final_content})}\n\n"
+        yield sse_content(final_content)
 
     except Exception as e:
         error_msg = f"Error: {str(e)}"
         logger.error(error_msg)
-        yield f"data: {json.dumps({'error': error_msg})}\n\n"
+        yield sse_error(error_msg)
     finally:
-        yield "data: [DONE]\n\n"
+        yield sse_done()
 
 
