@@ -67,6 +67,7 @@ class AgentState:
         self.current_provider: Optional[str] = None
         self.current_model: Optional[str] = None
         self.current_mcp_urls: List[str] = []
+        self.current_mcp_failures: List[str] = []
         self.current_temperature: Optional[float] = None
         self.lock = asyncio.Lock()
 
@@ -208,14 +209,6 @@ async def get_or_create_agent(
 
         logger.info(f"Config change detected: Re-initializing agent for provider '{provider}' with model '{model_name}' (temperature = '{temperature}')")
 
-        for exit_stack in state.exit_stacks:
-            try:
-                await exit_stack.aclose()
-            except Exception as e:
-                logger.debug(f"Note: Could not cleanly close a session: {e}")
-        state.exit_stacks = []
-        state.agent = None
-
         # Use centralized config for provider setup
         if provider == "gemini":
             api_key = llm_config.gemini_api_key
@@ -242,13 +235,19 @@ async def get_or_create_agent(
             from metaclaw_client import MetaClawClient, MetaClawDisabledError
             try:
                 metaclaw_client = MetaClawClient(llm_config, model_name=model_name)
-                # MetaClaw client returns its own streaming response, not a LangChain agent
-                # Store the client in state for later use
+                # MetaClaw client streams directly, but still lives in state so it can be cached.
+                for exit_stack in state.exit_stacks:
+                    try:
+                        await exit_stack.aclose()
+                    except Exception as e:
+                        logger.debug(f"Note: Could not cleanly close a session: {e}")
+                state.exit_stacks = []
                 state.metaclaw_client = metaclaw_client
-                state.agent = None  # Will be handled differently
+                state.agent = metaclaw_client
                 state.current_provider = provider
                 state.current_model = model_name
                 state.current_mcp_urls = mcp_urls.copy()
+                state.current_mcp_failures = []
                 state.current_temperature = temperature
                 return metaclaw_client  # Return special marker
             except MetaClawDisabledError:
@@ -256,67 +255,73 @@ async def get_or_create_agent(
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported provider: {provider}")
 
-    all_tools = []
-    failed_urls: List[str] = []  # Track MCP connection failures
+        all_tools = []
+        failed_urls: List[str] = []  # Track MCP connection failures
+        new_exit_stacks: List[AsyncExitStack] = []
 
-    if mcp_urls:
-        sessions = []
-        for url in mcp_urls:
-            max_retries = llm_config.mcp_connection_retries
-            connected = False
-            for attempt in range(max_retries):
-                try:
-                    logger.info(f"Attempting to connect to MCP server: {url} (Attempt {attempt + 1}/{max_retries})...")
+        if mcp_urls:
+            sessions = []
+            for url in mcp_urls:
+                max_retries = llm_config.mcp_connection_retries
+                connected = False
+                for attempt in range(max_retries):
                     exit_stack = AsyncExitStack()
-                    streams = await asyncio.wait_for(
-                        exit_stack.enter_async_context(streamable_http_client(url)),
-                        timeout=llm_config.mcp_connection_timeout
-                    )
-                    read, write, _ = streams
-                    session = await exit_stack.enter_async_context(ClientSession(read, write))
-                    await asyncio.wait_for(session.initialize(), timeout=llm_config.mcp_initialization_timeout)
-                    state.exit_stacks.append(exit_stack)
-                    sessions.append(session)
-                    logger.info(f"Successfully connected to MCP server: {url}")
-                    connected = True
-                    break
+                    try:
+                        logger.info(f"Attempting to connect to MCP server: {url} (Attempt {attempt + 1}/{max_retries})...")
+                        streams = await asyncio.wait_for(
+                            exit_stack.enter_async_context(streamable_http_client(url)),
+                            timeout=llm_config.mcp_connection_timeout
+                        )
+                        read, write, _ = streams
+                        session = await exit_stack.enter_async_context(ClientSession(read, write))
+                        await asyncio.wait_for(session.initialize(), timeout=llm_config.mcp_initialization_timeout)
+                        new_exit_stacks.append(exit_stack)
+                        sessions.append(session)
+                        logger.info(f"Successfully connected to MCP server: {url}")
+                        connected = True
+                        break
+                    except Exception as e:
+                        try:
+                            await exit_stack.aclose()
+                        except Exception as close_err:
+                            logger.debug(f"Could not close failed MCP session stack for {url}: {close_err}")
+                        logger.error(f"Failed to connect to MCP server {url} (Attempt {attempt + 1}): {e}")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(llm_config.mcp_retry_delay)
+
+                if not connected:
+                    logger.error(f"All {max_retries} connection attempts failed for {url}")
+                    failed_urls.append(url)
+
+            for session in sessions:
+                try:
+                    tools = await load_mcp_tools(session)
+                    all_tools.extend(tools)
                 except Exception as e:
-                    logger.error(f"Failed to connect to MCP server {url} (Attempt {attempt + 1}): {e}")
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(llm_config.mcp_retry_delay)
+                    logger.error(f"Failed to load tools from MCP server: {e}")
 
-            if not connected:
-                logger.error(f"All {max_retries} connection attempts failed for {url}")
-                failed_urls.append(url)
+        if all_tools:
+            logger.info("Using agent with MCP tools")
+            created_agent: Any = create_agent(llm, all_tools)
+        else:
+            logger.info("No MCP tools provided, using basic model")
+            created_agent = llm
 
-        for session in sessions:
+        for exit_stack in state.exit_stacks:
             try:
-                tools = await load_mcp_tools(session)
-                all_tools.extend(tools)
+                await exit_stack.aclose()
             except Exception as e:
-                logger.error(f"Failed to load tools from MCP server: {e}")
+                logger.debug(f"Note: Could not cleanly close a session: {e}")
 
-    if all_tools:
-        logger.info("Using agent with MCP tools")
-        created_agent: Any = create_agent(llm, all_tools)
-    else:
-        logger.info("No MCP tools provided, using basic model")
-        created_agent = llm
+        state.exit_stacks = new_exit_stacks
+        state.agent = created_agent
 
-    state.agent = created_agent
-
-    # Attach MCP failure information to agent for user warning
-    if failed_urls:
-        try:
-            setattr(created_agent, "_mcp_failures", failed_urls)
-        except Exception as e:
-            logger.debug(f"Could not attach _mcp_failures to agent: {e}")
-
-    state.current_provider = provider
-    state.current_model = model_name
-    state.current_mcp_urls = mcp_urls.copy()
-    state.current_temperature = temperature
-    return created_agent
+        state.current_provider = provider
+        state.current_model = model_name
+        state.current_mcp_urls = mcp_urls.copy()
+        state.current_mcp_failures = failed_urls.copy()
+        state.current_temperature = temperature
+        return created_agent
 
 
 def get_system_prompt(
@@ -625,17 +630,11 @@ async def _stream_standard_agent_response(
         agent_tools = getattr(cast(Any, agent), "tools", None)
         has_tools = bool(agent_tools)
 
-    # Emit warning if MCP servers were requested but failed to connect
-    if mcp_urls and hasattr(agent, '_mcp_failures'):
-        failures = getattr(agent, '_mcp_failures', [])
-        if failures:
-            warning_msg = f"> [WARNING]: Failed to connect to MCP servers: {', '.join(failures)}. Proceeding without tool support.\n\n"
-            yield sse_status(warning_msg)
-            # Remove attribute to avoid duplicate warnings if agent is reused
-            try:
-                delattr(agent, '_mcp_failures')
-            except Exception as e:
-                logger.debug(f"Could not delete _mcp_failures attribute: {e}")
+    # Emit warning if MCP servers were requested but failed to connect.
+    failures = state.current_mcp_failures if mcp_urls else []
+    if failures:
+        warning_msg = f"> [WARNING]: Failed to connect to MCP servers: {', '.join(failures)}. Proceeding without tool support.\n\n"
+        yield sse_status(warning_msg)
 
     last_turn_index = len(messages) - 1
     # Use the passed mcp_urls parameter, not state.current_mcp_urls
@@ -699,5 +698,3 @@ async def _stream_standard_agent_response(
         yield sse_error(error_msg)
     finally:
         yield sse_done()
-
-

@@ -11,10 +11,10 @@ Tests cover:
 Run with: pytest tests/test_metaclaw_integration.py -v
 """
 import os
+import sys
+from pathlib import Path
 import pytest
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
-from typing import Dict, Any
 
 # Set test environment before imports
 os.environ["METACLAW_ENABLED"] = "true"
@@ -22,8 +22,30 @@ os.environ["METACLAW_BASE_URL"] = "http://test-metaclaw:30000/v1"
 os.environ["METACLAW_API_KEY"] = "test-key"
 os.environ["GEMINI_API_KEY"] = "test-gemini-key"
 
-from chatbot_mcp_client.backend.config import LLMConfig
-from chatbot_mcp_client.backend.metaclaw_client import MetaClawClient, MetaClawDisabledError
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+from config import LLMConfig
+from metaclaw_client import MetaClawClient, MetaClawDisabledError
+
+
+class FakeStreamingLLM:
+    """Minimal async streaming LLM used to avoid provider calls in tests."""
+
+    def __init__(self, chunks):
+        self.chunks = chunks
+
+    async def astream(self, messages):
+        for content in self.chunks:
+            chunk = MagicMock()
+            chunk.content = content
+            yield chunk
+
+
+async def fake_sse_stream(*chunks):
+    for chunk in chunks:
+        yield chunk
 
 
 class TestLLMConfig:
@@ -56,15 +78,17 @@ class TestLLMConfig:
     def test_default_values(self):
         """Test that sensible defaults are provided"""
         # Clear relevant env vars
-        for key in ["METACLAW_BASE_URL", "METACLAW_API_KEY", "GEMINI_API_KEY",
-                    "GEMINI_MODEL", "GROQ_API_KEY", "GROQ_MODEL"]:
+        for key in ["METACLAW_ENABLED", "METACLAW_BASE_URL", "METACLAW_API_KEY",
+                    "METACLAW_MODEL", "GEMINI_API_KEY", "GEMINI_MODEL",
+                    "GROQ_API_KEY", "GROQ_MODEL"]:
             if key in os.environ:
                 del os.environ[key]
 
         config = LLMConfig.from_env()
 
         assert config.metaclaw_base_url == "http://localhost:30000/v1"
-        assert config.metaclaw_api_key == "metaclaw"
+        assert config.metaclaw_api_key is None
+        assert config.metaclaw_model == "qwen/qwen3-next-80b-a3b-instruct"
         assert config.gemini_model == "gemini-2.5-flash"
         assert config.groq_model == "llama-3.3-70b-versatile"
 
@@ -76,8 +100,10 @@ class TestMetaClawClient:
     def valid_config(self):
         """Create a valid LLMConfig for testing"""
         os.environ["METACLAW_ENABLED"] = "true"
+        os.environ["METACLAW_BASE_URL"] = "http://localhost:30000/v1"
         os.environ["METACLAW_API_KEY"] = "test-key"
         os.environ["GEMINI_API_KEY"] = "test-gemini"
+        os.environ.pop("METACLAW_MODEL", None)
         return LLMConfig.from_env()
 
     def test_client_initialization_success(self, valid_config):
@@ -87,10 +113,11 @@ class TestMetaClawClient:
         assert client.enabled is True
         assert client.base_url == "http://localhost:30000/v1"
         assert client.api_key == "test-key"
-        assert client.model == "gemini-2.5-flash"
+        assert client.model == "qwen/qwen3-next-80b-a3b-instruct"
 
     def test_client_initialization_disabled_raises(self):
         """Test that disabled MetaClaw raises error"""
+        os.environ["METACLAW_ENABLED"] = "false"
         config = LLMConfig.from_env()
         config.metaclaw_enabled = False
 
@@ -201,8 +228,10 @@ class TestMetaClawIntegration:
     def valid_config(self):
         """Create a valid LLMConfig for testing"""
         os.environ["METACLAW_ENABLED"] = "true"
+        os.environ["METACLAW_BASE_URL"] = "http://localhost:30000/v1"
         os.environ["METACLAW_API_KEY"] = "test-metaclaw"
         os.environ["GEMINI_API_KEY"] = "test-gemini"
+        os.environ.pop("METACLAW_MODEL", None)
         return LLMConfig.from_env()
 
     @pytest.mark.asyncio
@@ -220,14 +249,15 @@ class TestMetaClawIntegration:
         client = MetaClawClient(valid_config)
 
         # Mock the internal methods
-        client._get_metacaw_llm = AsyncMock()
+        client._get_metaclaw_llm = AsyncMock()
         mock_metaclaw_response = MagicMock()
-        mock_metaclaw_response.content = "I can help you with that!"
+        mock_metaclaw_response.content = "MetaClaw context"
         mock_metaclaw_response.tool_calls = []
-        client._get_metacaw_llm.return_value.ainvoke.return_value = mock_metaclaw_response
+        client._get_metaclaw_llm.return_value.ainvoke.return_value = mock_metaclaw_response
 
         # Mock _detect_tool_intent to return None
         client._detect_tool_intent = MagicMock(return_value=None)
+        client._get_fallback_llm = AsyncMock(return_value=FakeStreamingLLM(["I can help you with that!"]))
 
         # Collect stream output
         outputs = []
@@ -240,7 +270,7 @@ class TestMetaClawIntegration:
 
         # Should have content and DONE
         assert any('"content": "I can help you with that!"' in sse for sse in outputs)
-        assert any(sse.strip() == "data: [DONE]" for sse in outputs)
+        assert any("data: [DONE]" in sse for sse in outputs)
 
     @pytest.mark.asyncio
     async def test_metaClaw_stream_flow_with_tool_intent(self, valid_config):
@@ -248,14 +278,14 @@ class TestMetaClawIntegration:
         client = MetaClawClient(valid_config)
 
         # Mock MetaClaw LLM
-        client._get_metacaw_llm = AsyncMock()
+        client._get_metaclaw_llm = AsyncMock()
         mock_metaclaw_response = MagicMock()
         mock_metaclaw_response.content = "I'll build an MCP server for you."
         mock_metaclaw_response.tool_calls = [{
             "name": "create_mcp_server",
             "args": {"requirements": "Build a Twitter MCP server"}
         }]
-        client._get_metacaw_llm.return_value.ainvoke.return_value = mock_metaclaw_response
+        client._get_metaclaw_llm.return_value.ainvoke.return_value = mock_metaclaw_response
 
         # Mock _detect_tool_intent to return intent
         client._detect_tool_intent = MagicMock(return_value={
@@ -264,7 +294,9 @@ class TestMetaClawIntegration:
         })
 
         # Mock _execute_with_gemini
-        client._execute_with_gemini = AsyncMock(return_value="data: {\"content\": \"Building...\"}\n\ndata: [DONE]\n\n")
+        client._execute_with_gemini = MagicMock(
+            return_value=fake_sse_stream('data: {"content": "Building..."}\n\n', "data: [DONE]\n\n")
+        )
 
         # Collect stream output
         outputs = []
@@ -280,26 +312,48 @@ class TestMetaClawIntegration:
         assert len(outputs) > 0
 
     @pytest.mark.asyncio
+    async def test_metaclaw_use_mcp_tools_control_event(self, valid_config):
+        """Test that MetaClaw can signal the main route to use connected MCP tools."""
+        client = MetaClawClient(valid_config)
+
+        client._get_metaclaw_llm = AsyncMock()
+        mock_metaclaw_response = MagicMock()
+        mock_metaclaw_response.content = ""
+        mock_metaclaw_response.tool_calls = [{"name": "use_mcp_tools", "args": {}}]
+        client._get_metaclaw_llm.return_value.ainvoke.return_value = mock_metaclaw_response
+
+        outputs = []
+        async for sse in client.chat(
+            messages=[{"role": "user", "content": "Use the connected MCP tools"}],
+            temperature=0.0,
+            langgraph_url="http://test-langgraph:2024",
+            mcp_urls=["http://test-mcp/mcp"],
+        ):
+            outputs.append(sse)
+
+        assert any('"__use_standard_agent__": true' in sse for sse in outputs)
+
+    @pytest.mark.asyncio
     async def test_gemini_executor_failure_handled(self, valid_config):
         """Test that Gemini executor failure is handled gracefully"""
         client = MetaClawClient(valid_config)
 
         # Mock MetaClaw to return tool intent
-        client._get_metacaw_llm = AsyncMock()
+        client._get_metaclaw_llm = AsyncMock()
         mock_metaclaw_response = MagicMock()
         mock_metaclaw_response.content = "I'll build it."
         mock_metaclaw_response.tool_calls = [{
             "name": "create_mcp_server",
             "args": {"requirements": "Build something"}
         }]
-        client._get_metacaw_llm.return_value.ainvoke.return_value = mock_metaclaw_response
+        client._get_metaclaw_llm.return_value.ainvoke.return_value = mock_metaclaw_response
         client._detect_tool_intent = MagicMock(return_value={
             "type": "create_mcp_server",
             "requirements": "Build something"
         })
 
         # Mock _execute_with_gemini to raise
-        client._execute_with_gemini = AsyncMock(side_effect=Exception("Gemini failed"))
+        client._execute_with_gemini = MagicMock(side_effect=Exception("Gemini failed"))
 
         outputs = []
         async for sse in client.chat(
@@ -317,13 +371,14 @@ class TestMetaClawIntegration:
         """Test that LangGraph build progress is streamed correctly"""
         client = MetaClawClient(valid_config)
 
-        # Mock _get_metacaw_llm to return simple response without tool intent
-        client._get_metacaw_llm = AsyncMock()
+        # Mock _get_metaclaw_llm to return simple response without tool intent
+        client._get_metaclaw_llm = AsyncMock()
         mock_metaclaw_response = MagicMock()
-        mock_metaclaw_response.content = "Simple response"
+        mock_metaclaw_response.content = "MetaClaw context"
         mock_metaclaw_response.tool_calls = []
-        client._get_metacaw_llm.return_value.ainvoke.return_value = mock_metaclaw_response
+        client._get_metaclaw_llm.return_value.ainvoke.return_value = mock_metaclaw_response
         client._detect_tool_intent = MagicMock(return_value=None)
+        client._get_fallback_llm = AsyncMock(return_value=FakeStreamingLLM(["Simple response"]))
 
         outputs = []
         async for sse in client.chat(
@@ -335,7 +390,32 @@ class TestMetaClawIntegration:
 
         # Should have content and DONE
         assert any('"content": "Simple response"' in sse for sse in outputs)
-        assert any(sse.strip() == "data: [DONE]" for sse in outputs)
+        assert any("data: [DONE]" in sse for sse in outputs)
+
+    @pytest.mark.asyncio
+    async def test_gemini_executor_success_emits_done(self, valid_config):
+        """Test successful Gemini execution emits the final SSE done sentinel."""
+        client = MetaClawClient(valid_config)
+
+        mock_gemini_agent = MagicMock()
+        mock_gemini_agent.ainvoke = AsyncMock(return_value=MagicMock(tool_calls=[]))
+        client._get_gemini_executor = AsyncMock(return_value=mock_gemini_agent)
+
+        with patch(
+            "metaclaw_client.stream_langgraph_build",
+            return_value=fake_sse_stream('data: {"content": "Built"}\n\n'),
+        ):
+            outputs = []
+            async for sse in client._execute_with_gemini(
+                intent={"type": "create_mcp_server", "requirements": "Build test server"},
+                original_messages=[{"role": "user", "content": "Build"}],
+                metaclaw_context="",
+                temperature=0.0,
+                langgraph_url="http://test-langgraph:2024",
+            ):
+                outputs.append(sse)
+
+        assert outputs[-1] == 'data: {"type": "done"}\n\ndata: [DONE]\n\n'
 
 
 class TestFallbackBehavior:

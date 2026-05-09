@@ -152,8 +152,8 @@ export const useChatStore = create<ChatState>()(
       deleteHistory: (id: string) => {
         set((state) => ({
           history: state.history.filter((h) => h.id !== id),
-          currentChatId:
-            state.currentChatId === id ? null : state.currentChatId,
+          currentChatId: state.currentChatId === id ? null : state.currentChatId,
+          messages: state.currentChatId === id ? [] : state.messages,
         }));
       },
 
@@ -190,10 +190,12 @@ export const useChatStore = create<ChatState>()(
         const aiMessageId = uuidv4();
 
         try {
-          const historyForBackend = updatedMessages.map((msg) => ({
-            role: msg.role === "model" ? "model" : "user",
-            content: msg.content,
-          }));
+          const historyForBackend = updatedMessages
+            .filter((msg) => msg.role === "user" || msg.role === "model")
+            .map((msg) => ({
+              role: msg.role === "model" ? "model" : "user",
+              content: msg.content,
+            }));
 
           const response = await fetch(BACKEND_API.chat(), {
             method: "POST",
@@ -332,6 +334,7 @@ export const useChatStore = create<ChatState>()(
             lastActive: Date.now(),
           }));
         } finally {
+          persistCurrentChat();
           set({ isLoading: false });
         }
       },
@@ -340,6 +343,7 @@ export const useChatStore = create<ChatState>()(
       name: "gemini-insight-link-storage",
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
+        messages: state.messages,
         history: state.history,
         currentChatId: state.currentChatId,
         settings: state.settings,
@@ -357,6 +361,13 @@ export const useChatStore = create<ChatState>()(
 
           const now = Date.now();
           if (
+            state.currentChatId &&
+            (!state.messages || state.messages.length === 0)
+          ) {
+            state.currentChatId = null;
+          }
+
+          if (
             state.messages &&
             state.messages.length > 0 &&
             now - state.lastActive > SESSION_TIMEOUT
@@ -368,13 +379,24 @@ export const useChatStore = create<ChatState>()(
               firstMsg.length > 30
                 ? firstMsg.substring(0, 30) + "..."
                 : firstMsg;
-            const newItem: ChatHistoryItem = {
+            const archivedItem: ChatHistoryItem = {
               id: uuidv4(),
               title: `(Archived) ${title}`,
               messages: [...state.messages],
               timestamp: new Date().toISOString(),
             };
-            state.history = [newItem, ...state.history];
+
+            if (state.currentChatId) {
+              const existingIndex = state.history.findIndex(
+                (item) => item.id === state.currentChatId,
+              );
+              if (existingIndex !== -1) {
+                archivedItem.id = state.currentChatId;
+                state.history.splice(existingIndex, 1);
+              }
+            }
+
+            state.history = [archivedItem, ...state.history];
             state.messages = [];
             state.currentChatId = null;
             state.isRightPanelOpen = false;

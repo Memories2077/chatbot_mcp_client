@@ -444,6 +444,7 @@ Requirements from MetaClaw's analysis:
             # Stream LangGraph build - yield chunks directly
             async for sse_chunk in stream_langgraph_build(build_requirements, langgraph_url):
                 yield sse_chunk
+            yield sse_done()
 
         except Exception as e:
             logger.exception("Error during Gemini execution")

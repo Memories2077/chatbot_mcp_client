@@ -640,3 +640,32 @@ Resolved a critical issue where tool calls from MetaClaw were being "swallowed" 
 - **Files Modified**: `backend/main.py`
 
 ---
+
+## [2026-05-09] Stability Fix: Chat Persistence and MCP Agent Lifecycle
+
+### Overview
+
+Resolved several runtime logic risks in the chat/MCP system, focusing on active chat persistence, safe MCP session reinitialization, MetaClaw stream completion, and stale backend test coverage.
+
+### Changes
+
+- **Chat Session Persistence**: Persisted active `messages`, saved the current chat after request completion, cleared active messages when deleting the active history item, and prevented stale `currentChatId` values from corrupting history after reload.
+- **Backend Payload Hygiene**: Filtered frontend chat history before sending it to the backend so only `user` and `model` messages are replayed, preventing UI/system errors from becoming user prompts.
+- **MCP Agent Lifecycle**: Moved MCP session construction and state swapping under the agent lock, tracked MCP connection failures in state, cached MetaClaw clients correctly, and closed failed MCP `AsyncExitStack` instances to avoid leaks.
+- **SSE Completion**: Added the missing success-path `sse_done()` emission after MetaClaw/Gemini LangGraph build streaming.
+- **Test Updates**: Refreshed MetaClaw tests for current config defaults and import paths, fixed stale mock names, and added coverage for `use_mcp_tools` control events plus successful Gemini executor done sentinels.
+
+### Verification
+
+- `npm run typecheck`
+- `npm run build`
+- `uv run --no-sync pytest backend\tests\test_metaclaw_integration.py -q` (`22 passed`)
+
+### Files Modified
+
+- `src/lib/hooks/use-chat-store.ts`
+- `backend/main.py`
+- `backend/metaclaw_client.py`
+- `backend/tests/test_metaclaw_integration.py`
+
+---
