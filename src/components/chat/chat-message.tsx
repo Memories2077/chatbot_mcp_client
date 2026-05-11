@@ -137,6 +137,8 @@ const McpSuccessCard = ({ content }: { content: string }) => {
   if (jsonMatch) {
     jsonStr = typeof jsonMatch[1] === 'string' ? jsonMatch[1] : jsonMatch[0];
   }
+
+  const hasDetails = serverIdMatch || statusMatch || jsonStr;
   
   return (
     <div className="my-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.03] overflow-hidden transition-all duration-500">
@@ -148,12 +150,15 @@ const McpSuccessCard = ({ content }: { content: string }) => {
           <div className="w-7 h-7 rounded-full bg-emerald-500/10 flex items-center justify-center">
             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           </div>
-          <span className="text-[11px] font-bold tracking-[0.25em] uppercase text-emerald-500">MCP Server Created Successfully</span>
+          <span className="text-[11px] font-bold tracking-[0.25em] uppercase text-emerald-500">MCP Server Built Successfully</span>
         </div>
-        <ChevronDown className={cn("w-4 h-4 text-emerald-500/50 transition-transform duration-500", isOpen && "rotate-180")} />
+        {hasDetails ? (
+          <ChevronDown className={cn("w-4 h-4 text-emerald-500/50 transition-transform duration-500", isOpen && "rotate-180")} />
+        ) : null}
       </button>
-      
-      <div className={cn(
+
+      {hasDetails && (
+        <div className={cn(
         "transition-all duration-500 ease-in-out overflow-hidden",
         isOpen ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0"
       )}>
@@ -207,6 +212,7 @@ const McpSuccessCard = ({ content }: { content: string }) => {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 };
@@ -224,7 +230,7 @@ const parseContent = (text: string) => {
   const examinerMatch = text.match(/DELEGATE_TO_EXAMINER:([\s\S]*?)(?=DELEGATE_TO_GENERATOR:|ENRICHED_CONTEXT|✅|$)/i);
   const generatorMatch = text.match(/DELEGATE_TO_GENERATOR:([\s\S]*?)(?=ENRICHED_CONTEXT|✅|$)/i);
   const contextMatch = text.match(/ENRICHED_CONTEXT\s*\(RAG\):\s*([\s\S]*?)(?=✅|USER_ID|$)/i);
-  const successMatches = text.matchAll(/✅\s*MCP Server created successfully!([\s\S]*?)(?=✅|$)/gi);
+  const successMatches = text.matchAll(/✅\s*MCP Server (?:built|created) successfully!([\s\S]*?)(?=✅|$)/gi);
   
   if (examinerMatch) {
     sections.push({

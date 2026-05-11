@@ -34,6 +34,15 @@ export function McpServerFeedbackList({ className }: McpServerFeedbackListProps)
     loadServers();
   }, []);
 
+  // Auto-refresh when any server is still building
+  useEffect(() => {
+    const hasActiveBuild = servers.some(s => s.status === 'building' || s.status === 'created' || s.status === 'started');
+    if (!hasActiveBuild) return;
+
+    const interval = setInterval(loadServers, 5000);
+    return () => clearInterval(interval);
+  }, [servers]);
+
   const handleFeedback = async (serverId: string, type: 'like' | 'dislike') => {
     // Optimistic update
     setServers(prev =>

@@ -234,6 +234,7 @@ async def stream_langgraph_build(
                         last_msg_id = ""
 
         logger.info("--- LangGraph build completed ---")
+        yield f"data: {json.dumps({'type': 'mcp_build_complete', 'status': 'running', 'message': 'MCP Server built successfully!'})}\n\n"
 
     except Exception as lg_err:
         logger.exception("LangGraph build error")
