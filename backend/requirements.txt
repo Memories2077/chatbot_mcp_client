@@ -12,3 +12,5 @@ requests
 flask
 langchain-openai
 motor
+python-multipart
+loguru

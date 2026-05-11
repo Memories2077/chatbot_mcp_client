@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/lib/hooks/use-chat-store";
-import { MODEL_CONFIG, BACKEND_API } from "@/lib/config";
+import { MODEL_CONFIG, BACKEND_API, fetchBackendHealth, type BackendHealth } from "@/lib/config";
 import {
   Select,
   SelectContent,
@@ -15,12 +15,28 @@ import { Slider } from "@/components/ui/slider";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { McpServerFeedbackList } from '@/components/mcp/McpServerFeedbackList';
 
 export function RightUtilityPanel() {
   const { isRightPanelOpen, toggleRightPanel, settings, setSettings } = useChatStore();
   const [mcpInput, setMcpInput] = useState("");
   const [isVerifyingMcp, setIsVerifyingMcp] = useState(false);
   const { toast } = useToast();
+  const [health, setHealth] = useState<BackendHealth | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    fetchBackendHealth()
+      .then((data) => {
+        if (isMounted) setHealth(data);
+      })
+      .catch(() => {
+        if (isMounted) setHealth(null);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const providers = Object.keys(MODEL_CONFIG);
   const currentModels = MODEL_CONFIG[settings.provider]?.models || [];
@@ -28,9 +44,9 @@ export function RightUtilityPanel() {
   const handleAddMcp = async () => {
     const trimmedUrl = mcpInput.trim();
     if (!trimmedUrl) return;
-    
+
     setIsVerifyingMcp(true);
-    
+
     try {
       const response = await fetch(BACKEND_API.mcpMetadata(), {
         method: 'POST',
@@ -41,33 +57,39 @@ export function RightUtilityPanel() {
       const data = await response.json();
 
       if (!response.ok || data.status === "error") {
-        throw new Error(data.detail || "Connection refused by host or invalid MCP URL.");
+        const actionableMessages: Record<string, string> = {
+          timeout: "The MCP server did not respond before the timeout. Check that it is running and reachable.",
+          connect_error: "The backend could not connect to this MCP server. Verify the URL, port, and Docker/host networking.",
+          initialization_error: "The server responded but failed MCP initialization. Confirm it supports the MCP streamable HTTP transport.",
+          unsupported_transport: "This URL or transport is not supported. Use a valid MCP streamable HTTP endpoint.",
+        };
+        throw new Error(actionableMessages[data.errorCode] || data.detail || "Connection refused by host or invalid MCP URL.");
       }
-      
-      const newMcp = { 
-        name: data.name, 
-        url: trimmedUrl 
+
+      const newMcp = {
+        name: data.name,
+        url: trimmedUrl
       };
 
       if (settings.mcpServers.some(s => s.url === newMcp.url)) {
-        toast({ 
-          title: "Duplicate Server", 
+        toast({
+          title: "Duplicate Server",
           description: "This MCP server is already in your active list.",
-          variant: "destructive" 
+          variant: "destructive"
         });
       } else {
         setSettings({ mcpServers: [...settings.mcpServers, newMcp] });
         setMcpInput("");
-        toast({ 
-          title: "Neural Link Established", 
-          description: `Successfully connected to ${data.name}.` 
+        toast({
+          title: "Neural Link Established",
+          description: `Successfully connected to ${data.name}.`
         });
       }
     } catch (error: any) {
       console.error("MCP Verification Error:", error);
-      toast({ 
-        title: "Connection Failed", 
-        description: "Ethereal could not reach the specified neural node.",
+      toast({
+        title: "Connection Failed",
+        description: error instanceof Error ? error.message : "Ethereal could not reach the specified neural node.",
         variant: "destructive"
       });
     } finally {
@@ -80,7 +102,7 @@ export function RightUtilityPanel() {
   };
 
   return (
-    <aside 
+    <aside
       className={cn(
         "hidden lg:flex flex-col h-full gap-6 bg-surface-container-low/60 backdrop-blur-[32px] rounded-l-[3rem] shadow-[0_0_50px_rgba(0,0,0,0.3)] z-50 transition-all duration-500 ease-in-out overflow-hidden absolute right-0 top-0",
         isRightPanelOpen ? "w-80 opacity-100 translate-x-0 p-6" : "w-0 p-0 opacity-0 translate-x-full"
@@ -94,26 +116,41 @@ export function RightUtilityPanel() {
               System Optimal
             </span>
           </div>
-          <button 
+          <button
             onClick={toggleRightPanel}
             className="p-1.5 rounded-full hover:bg-surface-container/40 text-primary transition-all duration-200"
           >
             <span className="material-symbols-outlined text-xl">close</span>
           </button>
         </div>
-        
+
         <h3 className="font-headline font-bold text-lg text-primary mt-2 flex items-center gap-2">
           <span className="material-symbols-outlined">tune</span>
           Model Settings
         </h3>
       </div>
-      
+
       <div className="flex-1 overflow-y-auto space-y-6 pr-2 no-scrollbar">
+        {health?.metaclawEnabled && (
+          <div className="space-y-2 rounded-2xl border border-violet-500/20 bg-violet-500/10 p-4">
+            <div className="flex items-center gap-2 text-violet-200">
+              <span className="material-symbols-outlined text-base">psychology</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest">MetaClaw proxy enabled</span>
+            </div>
+            <p className="text-[10px] leading-relaxed text-on-surface-variant">
+              Provider/model selections are used for direct or fallback mode. Current chat requests route through MetaClaw.
+            </p>
+            <p className="text-[9px] font-mono text-violet-200/80">
+              Fallbacks: {health.configuredFallbacks.length > 0 ? health.configuredFallbacks.join(', ') : 'none configured'}
+            </p>
+          </div>
+        )}
+
         {/* Provider Selection */}
         <div className="space-y-2">
           <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest ml-1">Provider</label>
-          <Select 
-            value={settings.provider} 
+          <Select
+            value={settings.provider}
             onValueChange={(val: any) => setSettings({ provider: val })}
           >
             <SelectTrigger className="w-full bg-surface-container-lowest/50 border-outline-variant/10 rounded-xl h-12">
@@ -130,8 +167,8 @@ export function RightUtilityPanel() {
         {/* Model Selection */}
         <div className="space-y-2">
           <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest ml-1">Model Name</label>
-          <Select 
-            value={settings.model} 
+          <Select
+            value={settings.model}
             onValueChange={(val) => setSettings({ model: val })}
           >
             <SelectTrigger className="w-full bg-surface-container-lowest/50 border-outline-variant/10 rounded-xl h-12">
@@ -169,19 +206,19 @@ export function RightUtilityPanel() {
             <span className="material-symbols-outlined text-lg">hub</span>
             MCP Tools
           </h3>
-          
+
           <div className="flex gap-2">
-            <Input 
-              placeholder="Server URL..." 
+            <Input
+              placeholder="Server URL..."
               value={mcpInput}
               onChange={(e) => setMcpInput(e.target.value)}
               className="bg-surface-container-lowest/50 border-outline-variant/10 rounded-xl flex-1"
               disabled={isVerifyingMcp}
               onKeyDown={(e) => e.key === "Enter" && handleAddMcp()}
             />
-            <Button 
+            <Button
               onClick={handleAddMcp}
-              size="icon" 
+              size="icon"
               className="rounded-xl bg-primary text-on-primary shrink-0"
               disabled={isVerifyingMcp || !mcpInput.trim()}
             >
@@ -195,15 +232,15 @@ export function RightUtilityPanel() {
 
           <div className="space-y-2 max-h-48 overflow-y-auto pr-1 no-scrollbar">
             {settings.mcpServers.map((server) => (
-              <div 
-                key={server.url} 
+              <div
+                key={server.url}
                 className="group flex items-center justify-between p-3 bg-surface-container-lowest/30 rounded-xl border border-outline-variant/5 hover:border-outline-variant/20 transition-all"
               >
                 <div className="flex flex-col overflow-hidden mr-2">
                   <span className="text-xs font-bold text-on-surface truncate">{server.name}</span>
                   <span className="text-[9px] text-on-surface-variant truncate opacity-60">{server.url}</span>
                 </div>
-                <button 
+                <button
                   onClick={() => handleRemoveMcp(server.url)}
                   className="opacity-0 group-hover:opacity-100 p-1 hover:text-error transition-all"
                 >
@@ -218,6 +255,15 @@ export function RightUtilityPanel() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Generated MCP Servers with Feedback */}
+        <div className="space-y-3">
+          <h3 className="font-headline font-bold text-sm text-primary flex items-center gap-2">
+            <span className="material-symbols-outlined">precision_manufacturing</span>
+            Generated MCP Servers
+          </h3>
+          <McpServerFeedbackList />
         </div>
       </div>
 

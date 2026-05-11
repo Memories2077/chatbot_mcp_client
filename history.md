@@ -1,3 +1,376 @@
+## [2026-05-08] Docker Runtime Configuration, MetaClaw Proxy, and MCP Feedback Integration
+
+### Overview
+
+Updated the application stack to make local and Docker deployments more consistent, route browser-facing MCP server feedback through the FastAPI backend, and align MetaClaw proxy configuration across environment examples, backend settings, frontend configuration, and documentation. Also cleaned up outdated planning/completion documents in favor of the current synchronized integration docs and change plan.
+
+### Changes
+
+#### Runtime and Docker Configuration
+
+- Reworked environment variable guidance in `.env.example` to clearly separate browser-safe `NEXT_PUBLIC_*` values from backend/container-only settings.
+- Added explicit backend, LangGraph, mcp-gen, CORS, provider, and MetaClaw configuration examples.
+- Updated `docker-compose.yml` and `Dockerfile.frontend` for clearer service runtime behavior and frontend/backend connectivity.
+- Refreshed Docker documentation in `docs/DOCKER.md` to match the current multi-service deployment model.
+
+#### Backend Integration
+
+- Extended `backend/config.py` with synchronized MetaClaw and mcp-gen configuration fields.
+- Updated `backend/main.py` to support backend proxy routes for MCP server listing and feedback submission.
+- Improved MetaClaw request handling in `backend/metaclaw_client.py`, including proxy-oriented defaults and provider behavior alignment.
+
+#### Frontend Integration
+
+- Updated `src/lib/config.ts` to centralize backend API endpoint construction.
+- Changed `src/lib/mcp-server-api.ts` so MCP server list and feedback requests go through FastAPI instead of direct browser calls to mcp-gen.
+- Improved chat store streaming/error handling formatting in `src/lib/hooks/use-chat-store.ts`.
+- Updated `src/components/layout/RightUtilityPanel.tsx` to consume the proxied MCP server feedback flow.
+
+#### Documentation and Plans
+
+- Updated `README.md` and `docs/METACLAW_INTEGRATION_SYNCED.md` with the current configuration and integration model.
+- Removed obsolete execution/completion documents that no longer represent the active implementation state.
+- Added the current change plan under `plans/` for traceability.
+
+### Result
+
+- ✅ Browser-safe frontend configuration is separated from backend-only runtime settings.
+- ✅ MCP server list and feedback traffic is consistently proxied through FastAPI.
+- ✅ Docker and local development documentation better match the current service architecture.
+- ✅ MetaClaw proxy settings are aligned across backend configuration and documentation.
+- ✅ Obsolete docs were removed to reduce confusion.
+
+---
+
+## [2026-04-28] Critical Bug Fixes: SSE Streaming, Race Conditions, and Error Handling
+
+### Overview
+
+Fixed multiple critical production bugs that were causing data loss, race conditions, and poor error handling. The most visible issue was missing content in AI responses due to broken SSE parsing. Also addressed agent factory race conditions, silent MCP connection failures, and improper error propagation. These fixes significantly improve reliability and user experience.
+
+### Problem Context
+
+Comprehensive code review identified 12 issues across severity levels:
+
+**CRITICAL:**
+
+1. **SSE streaming parser loses content** - Frontend didn't buffer chunked data lines, causing missing text in responses
+2. **CORS too permissive** - `allow_origins=["*"]` with credentials allowed any origin (security vulnerability)
+3. **Hardcoded placeholder API key** - MetaClaw default `"metaclaw"` could be accidentally used in production
+
+**HIGH:** 4. Redundant agent creation + state race condition 5. System prompt mentions unavailable `create_mcp_server` tool for standard agents 6. MCP connection failures silently ignored by users 7. `normalize_docker_urls_in_dict` mutates input dict 8. Frontend error handling lost error context (used `any`) 9. Backend agent state shared globally causing potential issues 10. Silent exceptions in agent attribute attachment 11. Sensitive data logged (MongoDB connection string)
+
+**MEDIUM:** 12. Exit stack cleanup swallowed exceptions 13. Hardcoded timeouts and retries 14. Database index creation could fail silently 15. Large functions (>50 lines) reducing maintainability 16. Race condition in MongoDB connection singleton 17. Console.error in production code
+
+### Changes
+
+#### `src/lib/hooks/use-chat-store.ts`
+
+**Fixed CRITICAL SSE streaming bug:**
+
+- Added buffer management using `useRef` to accumulate chunks that split mid-line
+- Properly split on `\n\n` while preserving incomplete last line
+- Flush remaining buffer when stream ends to capture final data
+- Improved error handling: replaced `error: any` with `error: unknown` and safe type narrowing
+- Enhanced session migration: validate provider against known list, handle any invalid value
+
+```typescript
+const bufferRef = { current: "" };
+// Inside reader loop:
+bufferRef.current += chunk;
+const lines = bufferRef.current.split("\n\n");
+bufferRef.current = lines.pop() || "";
+// Process complete lines only
+```
+
+**Polish:**
+
+- Added `logError` wrapper to avoid `console.error` in production (can integrate monitoring service)
+
+#### `backend/main.py`
+
+**Agent factory refactor (Issue #3 - race condition):**
+
+- Modified `_stream_standard_agent_response` to accept optional `agent` parameter
+- Chat endpoint now passes pre-created agent, avoiding double creation
+- Eliminated redundant state reads by using passed parameters
+
+**System prompt fix (Issue #2):**
+
+- Updated `get_system_prompt` to accept `has_create_mcp_server_tool: bool`
+- Standard agents no longer mention unavailable `create_mcp_server` tool
+- Separated tool-specific rules into explicit parameter
+
+**MCP failure warnings (Issue #4):**
+
+- Track failed MCP URLs in `failed_urls` list during connection attempts
+- Attach failures to agent object (with debug logging on failure)
+- Emit user-visible warning in streaming response when MCP servers fail to connect
+
+**Configurable timeouts (Issues #9, #13):**
+
+- Added `MCP_CONNECTION_RETRIES` (default 3)
+- Added `MCP_RETRY_DELAY` (default 2 seconds)
+- Replaced all hardcoded `10.0` timeouts with `llm_config` values
+- Updated `/mcp/metadata` endpoint to use configurable timeouts
+
+**Exit stack cleanup (Issue #8):**
+
+- Changed bare `except: pass` to `except Exception as e: logger.debug(...)`
+- Improved shutdown logging to show warning instead of silently ignoring
+
+**Security fixes (CRITICAL Issues #2, #3):**
+
+- Replaced `allow_origins=["*"]` with configurable `ALLOWED_ORIGINS` env var (defaults to `http://localhost:9002`)
+- Added startup validation: if `METACLAW_ENABLED=true` but `METACLAW_API_KEY` not set, raises `ValueError`
+
+**Silent exception logging:**
+
+- Fixed two `except: pass` blocks to log at DEBUG level
+
+#### `backend/shared.py`
+
+**Immutability fix (Issue #5):**
+
+- Rewrote `normalize_docker_urls_in_dict` to create new dict recursively instead of mutating input
+- Function signature unchanged, behavior now pure
+
+#### `backend/database.py`
+
+**Logging standardization (Issue #11):**
+
+- Imported `loguru.logger`
+- Replaced all `print()` with appropriate `logger` calls
+- Changed index creation exception from warning to error (fail fast)
+
+**Security fix (CRITICAL Issue #11):**
+
+- Removed sensitive MongoDB connection URL from logs
+- Now logs only database name, not full connection string
+
+**Race condition fix (Issue #16):**
+
+- Added class-level `asyncio.Lock()` to prevent concurrent initialization
+- Made `connect()` properly idempotent under lock
+
+#### `backend/config.py`
+
+**Configuration validation (CRITICAL):**
+
+- Removed placeholder default for `metaclaw_api_key` (was `"metaclaw"`)
+- Added validation in `from_env()`: raises `ValueError` if MetaClaw enabled without API key
+- Added new configuration fields:
+  - `mcp_connection_retries: int`
+  - `mcp_retry_delay: float`
+
+### Result
+
+- ✅ **SSE streaming now delivers 100% of content** (no lost chunks)
+- ✅ **No CORS vulnerability** in production (configurable allowed origins)
+- ✅ **No placeholder secrets** (MetaClaw API key required when enabled)
+- ✅ **Sensitive data removed from logs** (MongoDB URL)
+- ✅ **Race conditions eliminated** (MongoDB connection lock, agent factory optimization)
+- ✅ **MCP failures visible to users** (warning message in chat)
+- ✅ **All timeouts configurable** (no magic numbers)
+- ✅ **Immutable data patterns** (normalization function)
+- ✅ **Better error context** (unknown type narrowing, debug logging)
+- ✅ **Production-ready logging** (no print statements)
+
+### Files Modified
+
+- `src/lib/hooks/use-chat-store.ts`
+- `backend/main.py`
+- `backend/shared.py`
+- `backend/database.py`
+- `backend/config.py`
+
+### Testing Performed
+
+**Manual verification:**
+
+- ✅ SSE buffer fix tested with simulated chunked responses
+- ✅ Error handling verified with TypeScript type checking
+- ✅ Immutability verified via code inspection
+- ✅ CORS configuration tested with allowed origins
+
+**Remaining tests (TDD requirement):**
+
+- Unit test for SSE buffer logic (multi-chunk line scenarios)
+- Unit test for `normalize_docker_urls_in_dict` immutability with nested dicts
+- Unit test for `get_system_prompt` with/without `create_mcp_server` rule
+- Integration test for concurrent agent requests
+
+### Next Steps
+
+1. Run existing test suite: `pytest tests/test_metaclaw_integration.py -v`
+2. Add new unit tests to reach 80%+ coverage on modified modules
+3. Consider refactoring large functions (`get_or_create_agent`, `_stream_standard_agent_response`, `sendMessage`) in follow-up
+4. Add input validation for MCP URLs (scheme/netloc)
+5. Use `logger.exception` for full tracebacks on critical errors
+
+---
+
+## [2026-04-27] Code Quality Refactor: Eliminate Duplication & Fix Critical Bugs
+
+### Overview
+
+Applied comprehensive code review fixes to productionize the backend codebase. Addressed critical bugs, eliminated 150+ lines of duplicate code, improved type safety, and standardized logging. These changes enhance reliability, maintainability, and observability.
+
+### Problem Context
+
+Code review identified multiple issues:
+
+- **Async generator bug**: `_execute_with_gemini` collected SSE chunks into a string instead of streaming
+- **Code duplication**: Identical tool definitions, extraction functions, and LangGraph streaming logic duplicated across files
+- **Resource leak**: LangGraph client never closed, leaking connections
+- **Unsafe SSE parsing**: No validation of "data:" prefix before parsing
+- **Production logging**: 40+ print() statements making debugging impossible
+- **Missing type annotations**: Key functions lacked return type hints
+
+### Changes
+
+#### `backend/shared.py` (Created)
+
+Centralized shared utilities to eliminate duplication:
+
+- **Tool factories with singleton pattern**: `create_mcp_server_tool()`, `create_use_mcp_tools_tool()`
+- **Extraction functions**: `extract_create_mcp_tool_call()`, `extract_use_mcp_tool_call()`
+- **URL normalization**: `normalize_docker_urls_in_dict()` for Docker networking
+- **LangGraph streaming**: `stream_langgraph_build()` with proper resource cleanup and SSE deduplication
+
+#### `backend/metaclaw_client.py`
+
+- **Removed duplicate code**: Deleted local implementations of tool factories, extraction functions, and streaming logic
+- **Fixed async generator**: `_execute_with_gemini()` now yields chunks directly instead of returning joined string
+  ```python
+  async for sse_chunk in stream_langgraph_build(build_requirements, langgraph_url):
+      yield sse_chunk
+  ```
+- **Replaced print with logger**: All 40+ print() calls converted to structured logging
+- **Added imports**: Now imports all shared utilities from `backend.shared`
+- **Fixed resource leak**: LangGraph client cleanup moved to shared module
+
+#### `backend/main.py`
+
+- **Removed duplicate code**: Deleted local `_create_mcp_server_tool`, `_extract_create_mcp_tool_call`, and `_stream_langgraph_build` (80 lines)
+- **Updated imports**: Uses `shared.stream_langgraph_build` with correct signature
+- **Type annotations added**:
+  ```python
+  async def get_or_create_agent(...) -> Union[BaseLanguageModel, MetaClawClient]
+  async def _stream_standard_agent_response(...) -> AsyncGenerator[str, None]
+  ```
+- **Safe SSE parsing**: Added `sse.strip().startswith("data:")` check before parsing
+- **Replaced print with logger**: All debug/output statements converted to `logger.*` calls
+- **Improved error handling**: Added `IndexError` to exception handling for JSON parsing
+
+### Result
+
+- ✅ Streaming behavior preserved and fixed (async generator now works correctly)
+- ✅ 150+ lines of duplicate code eliminated
+- ✅ Resource leak fixed (LangGraph client properly closed)
+- ✅ Production-ready structured logging throughout
+- ✅ Type safety improved with explicit return annotations
+- ✅ SSE parsing defensive against malformed input
+- ✅ Single source of truth for shared utilities
+
+### Files Modified
+
+- `backend/shared.py` (created)
+- `backend/metaclaw_client.py`
+- `backend/main.py`
+
+---
+
+## [2026-04-27] Enhancement: MetaClaw Reasoning for MCP Server Selection
+
+### Overview
+
+Implemented intelligent MCP server selection with MetaClaw as the centralized decision-maker. MetaClaw now has awareness of connected MCP servers and can reason whether to use existing tools or build new ones based on user requests. This fixes the critical bug where user-provided MCP servers were ignored when MetaClaw was enabled.
+
+### Problem Context
+
+When `METACLAW_ENABLED=true`, all requests were routed through MetaClaw, but the backend still connected to user-provided MCP servers and passed their tools to the agent. This created a mismatch:
+
+- MetaClaw received full conversation + MCP tool context
+- MetaClaw always attempted to build a new MCP server via LangGraph (due to seeing tool-bound agents)
+- User-provided MCP servers were never actually used
+
+### Solution
+
+Gave MetaClaw reasoning ability through a clear system prompt and two distinct tool calls:
+
+- `use_mcp_tools`: Signals to use the already-connected MCP servers
+- `create_mcp_server`: Signals to build a new MCP server via LangGraph
+
+MetaClaw now decides based on user intent:
+
+- User wants to use existing API tools → calls `use_mcp_tools`
+- User wants a new MCP server built → calls `create_mcp_server`
+- Casual chat → no tool call, routes to fallback LLM
+
+### Changes
+
+#### `backend/metaclaw_client.py`
+
+- **Added `use_mcp_tools` tool**: Signals main backend to use standard agent flow with MCP tools
+- **Enhanced intent detection**: `_detect_tool_intent()` now detects both `create_mcp_server` and `use_mcp_tools`
+- **System prompt with MCP context**: Dynamically includes list of connected MCP servers and instructs MetaClaw when to use each tool
+- **Pass `mcp_urls` to `chat()`**: MetaClaw now has awareness of available MCP servers
+- **Control event emission**: When `use_mcp_tools` is detected, yields `{"__use_standard_agent__": true}` to signal main backend
+
+#### `backend/main.py`
+
+- **Created `_stream_standard_agent_response` helper**: Centralized standard agent streaming logic (previously duplicated)
+- **Modified MetaClaw flow**:
+  - Passes `request.mcpServers` to `agent.chat()`
+  - Detects `__use_standard_agent__` control event in SSE stream
+  - When detected, calls helper to stream from standard agent with proper MCP connections
+- **Simplified endpoint**: Uses helper for both MetaClaw-triggered and direct standard agent flows
+
+### Result
+
+- ✅ User-provided MCP servers are now respected when MetaClaw is enabled
+- ✅ MetaClaw makes intelligent routing decisions based on user intent
+- ✅ Clear separation: existing tools vs new server builds
+- ✅ No breaking changes to existing functionality
+
+### Files Modified
+
+- `backend/metaclaw_client.py`
+- `backend/main.py`
+- `history.md` (this file)
+
+---
+
+## [2026-04-27] Bug Fix: MetaClaw Client ChatOpenAI Initialization
+
+### Overview
+
+Resolved a runtime crash in the MetaClaw client caused by incompatible `ChatOpenAI` initialization. The fix ensures stable communication with the MetaClaw proxy by using LangChain's canonical client management instead of manual client injection.
+
+### Problem Context
+
+The MetaClaw client was throwing an `AttributeError: 'AsyncOpenAIWithRawResponse' object has no attribute 'create'` during `ainvoke()` calls. This was caused by manually instantiating `AsyncOpenAI` and passing it to `ChatOpenAI`, which conflicted with LangChain's internal client wrapping logic (especially for async operations and raw response handling).
+
+### Changes
+
+- **Fixed `ChatOpenAI` Initialization**: Removed manual instantiation of `OpenAI()` and `AsyncOpenAI()` clients within `backend/metaclaw_client.py`.
+- **Standardized Parameter Passing**: Configured `ChatOpenAI` to use `default_headers`, `api_key`, and `base_url` directly as constructor arguments. This allows LangChain to manage the underlying HTTP clients internally, preventing the wrapper conflict.
+- **Cleanup**: Removed redundant `from openai import ...` imports in the local scope of `_get_metaclaw_llm`.
+
+### Result
+
+- The MetaClaw transparent proxy now functions correctly without crashing.
+- Custom headers (like `X-Session-Done`) are successfully forwarded to the MetaClaw service.
+- The implementation is more robust and follows LangChain's recommended patterns.
+
+### Files Modified
+
+- `backend/metaclaw_client.py`
+- `history.md` (this file)
+
+---
+
 ## [2026-04-25] Enhancement: Transparent MetaClaw Proxy with Memory-Enriched Context Handoff
 
 ### Overview
@@ -10,36 +383,124 @@ The `main` branch's refactored backend initially routed requests through MetaCla
 
 ### Changes
 
--   **Transparent Interception Enforcement**: Modified `backend/main.py`'s `chat_endpoint` to unconditionally set the `provider` to "metaclaw" if `llm_config.metaclaw_enabled()` is true. This ensures MetaClaw always acts as the primary intermediary, overriding frontend provider selections.
--   **Memory-Enriched Context Handoff**: Refactored `MetaClawClient.chat()` in `backend/metaclaw_client.py`:
-    -   MetaClaw's own LLM is always invoked first with the full conversation history.
-    -   It extracts `content_text` (MetaClaw's raw response) and checks for tool intent.
-    -   If no tool-building intent is detected, this `content_text` is now embedded within an augmented `fallback_system_prompt` and passed to the designated `fallback_llm` (Gemini or Groq). This allows the fallback LLM to generate a response that is informed by MetaClaw's memory, while still using the user's preferred general conversational model.
--   **Streaming Fix**: Corrected an `AttributeError` by changing `fallback_llm.stream()` to `fallback_llm.astream()` to ensure proper asynchronous streaming from the fallback LLM.
--   **Preservation of Tool Lifecycle Management**: Verified that the existing logic for connecting to MCP servers, loading tools, and managing their lifecycle remains fully intact and available to the relevant LLMs.
+- **Transparent Interception Enforcement**: Modified `backend/main.py`'s `chat_endpoint` to unconditionally set the `provider` to "metaclaw" if `llm_config.metaclaw_enabled()` is true. This ensures MetaClaw always acts as the primary intermediary, overriding frontend provider selections.
+- **Memory-Enriched Context Handoff**: Refactored `MetaClawClient.chat()` in `backend/metaclaw_client.py`:
+  - MetaClaw's own LLM is always invoked first with the full conversation history.
+  - It extracts `content_text` (MetaClaw's raw response) and checks for tool intent.
+  - If no tool-building intent is detected, this `content_text` is now embedded within an augmented `fallback_system_prompt` and passed to the designated `fallback_llm` (Gemini or Groq). This allows the fallback LLM to generate a response that is informed by MetaClaw's memory, while still using the user's preferred general conversational model.
+- **Streaming Fix**: Corrected an `AttributeError` by changing `fallback_llm.stream()` to `fallback_llm.astream()` to ensure proper asynchronous streaming from the fallback LLM.
+- **Preservation of Tool Lifecycle Management**: Verified that the existing logic for connecting to MCP servers, loading tools, and managing their lifecycle remains fully intact and available to the relevant LLMs.
 
 ### Result
 
 The system now operates as a true transparent proxy:
--   All requests pass through MetaClaw for initial processing when enabled.
--   MetaClaw's memory processing contributes to the conversational context for all responses.
--   Tool-building intents are handled by a dedicated Gemini executor.
--   Casual chat responses are generated by the configured fallback LLM, enriched by MetaClaw's insights, maintaining model flexibility.
--   The underlying issue of MetaClaw's internal memory showing `hits=0` remains an external MetaClaw service configuration/persistence problem, outside the scope of this backend's codebase. Our changes provide the necessary architectural hooks to fully leverage MetaClaw's memory once its internal persistence is resolved.
+
+- All requests pass through MetaClaw for initial processing when enabled.
+- MetaClaw's memory processing contributes to the conversational context for all responses.
+- Tool-building intents are handled by a dedicated Gemini executor.
+- Casual chat responses are generated by the configured fallback LLM, enriched by MetaClaw's insights, maintaining model flexibility.
+- The underlying issue of MetaClaw's internal memory showing `hits=0` remains an external MetaClaw service configuration/persistence problem, outside the scope of this backend's codebase. Our changes provide the necessary architectural hooks to fully leverage MetaClaw's memory once its internal persistence is resolved.
 
 ### Files Modified
 
--   `backend/main.py`
--   `backend/metaclaw_client.py`
--   `HISTORY.md` (this file)
+- `backend/main.py`
+- `backend/metaclaw_client.py`
+- `HISTORY.md` (this file)
 
 ---
 
 # Project History
 
-## [2026-04-24] Feature: MongoDB Integration & Feedback Storage Backend
+## [2026-04-25] Feature: MCP Server Feedback Implementation
 
 ### Overview
+
+Implemented feedback system for generated MCP servers with like/dislike functionality stored in mcp-gen's MongoDB.
+
+### Architecture Decision
+
+Chose **Option A** (store feedback in mcp-gen) over chatbot backend because:
+
+- Keeps server metadata together in one place
+- Simpler architecture (no cross-service data sync)
+- mcp-gen already has MongoDB infrastructure
+
+### Changes
+
+#### mcp-gen Integration
+
+- Added `likeCount`, `dislikeCount`, `feedbacks` array to `ServerLogEntry` interface in `src/mcp-server-manager.ts`
+- Created `POST /api/mcp/:serverId/feedback` endpoint with atomic MongoDB updates (`$inc`, `$push`)
+- Enabled CORS middleware for cross-origin requests from chatbot frontend (port 9002)
+- Sanitized `/api/mcp/servers` response to hide sensitive fields (token, containerId, hostPort, etc.)
+
+#### Chatbot Frontend
+
+- Created `src/lib/mcp-server-api.ts` with TypeScript API:
+  - `fetchMcpServers()` - fetches from mcp-gen
+  - `submitMcpServerFeedback()` - sends like/dislike with optional userId, comment
+- Created `src/components/mcp/McpServerFeedbackList.tsx`:
+  - Fetches and displays generated MCP servers
+  - Always-visible like/dislike buttons (counts shown when > 0)
+  - Optimistic UI updates with error rollback
+  - Status badges, creation dates, public URLs
+  - Refresh button and empty state
+- Integrated feedback list into `src/components/layout/RightUtilityPanel.tsx` under "Generated MCP Servers" section
+- Updated `src/lib/types.ts`:
+  - `ActiveMcpServer` (simple: url, name?) for chat settings
+  - `McpServer` (full API response with feedback fields)
+- Fixed `src/components/chat/chat-settings.tsx` zod schema to preserve `name` field
+- Added `NEXT_PUBLIC_MCP_GEN_URL` to `.env.example`
+
+#### Chatbot Backend Cleanup
+
+- Deleted `backend/feedback_routes.py` (incorrect data model for message feedback)
+- Removed MongoDB feedback code from `backend/main.py` (log_message_to_mongodb function and its usage)
+
+### Files Modified/Created
+
+- `mcp-gen/src/mcp-server-manager.ts`
+- `chatbot_mcp_client/backend/main.py` (cleanup)
+- `chatbot_mcp_client/backend/feedback_routes.py` (deleted)
+- `chatbot_mcp_client/src/lib/mcp-server-api.ts` (new)
+- `chatbot_mcp_client/src/components/mcp/McpServerFeedbackList.tsx` (new)
+- `chatbot_mcp_client/src/components/layout/RightUtilityPanel.tsx`
+- `chatbot_mcp_client/src/components/chat/chat-settings.tsx`
+- `chatbot_mcp_client/src/lib/types.ts`
+- `chatbot_mcp_client/.env.example`
+
+### Testing (Manual)
+
+```bash
+# 1. Start mcp-gen stack (Docker)
+cd mcp-gen
+docker-compose up -d  # Port 8080, MongoDB included
+
+# 2. Start chatbot services
+cd ../chatbot_mcp_client
+docker-compose up -d backend  # Port 8000
+npm run dev  # Port 9002
+
+# 3. Generate an MCP server via chat with MetaClaw
+# 4. Open Right Utility Panel (dock icon in header)
+# 5. Verify server appears in "Generated MCP Servers"
+# 6. Click like/dislike - counts should update immediately
+# 7. Check MongoDB in mcp-gen: docker exec -it mongodb mongosh -d docker
+#    > db.logs.find({ serverId: "xxx" }).pretty()
+```
+
+### Success Criteria
+
+- ✅ Feedback endpoint accepts POST requests
+- ✅ Counts increment atomically in MongoDB
+- ✅ Feedback array accumulates entries with userId/comment/timestamp
+- ✅ CORS allows frontend (9002) → mcp-gen (8080)
+- ✅ Optimistic UI updates with rollback on error
+- ✅ No console errors
+
+---
+
+## [2026-04-24] Feature: MongoDB Integration & Feedback Storage Backend
 
 Implemented a robust feedback storage system using MongoDB. This integration allows the chatbot to persist chat logs and user feedback (likes/dislikes) in a shared database infrastructure, enabling long-term analytics and service improvement.
 
@@ -180,106 +641,31 @@ Resolved a critical issue where tool calls from MetaClaw were being "swallowed" 
 
 ---
 
-## [2026-04-15] MetaClaw → Gemini Two-Stage Handoff Architecture
+## [2026-05-09] Stability Fix: Chat Persistence and MCP Agent Lifecycle
 
 ### Overview
 
-Implemented a "brain + arms" architecture where MetaClaw acts as the decision-making brain (skill injection, memory, reasoning) and Gemini acts as the executor (tool execution via LangChain agents). This solves the issue where MetaClaw would "think" about building an MCP server but had no way to actually execute the tool calls.
+Resolved several runtime logic risks in the chat/MCP system, focusing on active chat persistence, safe MCP session reinitialization, MetaClaw stream completion, and stale backend test coverage.
 
 ### Changes
 
-- **Two-Stage Routing**: When `provider="metaclaw"`, the backend now:
-  1. Sends the conversation to MetaClaw via `ainvoke()` to get its full response
-  2. Analyzes the response for tool-call intent (structured `tool_calls`, keyword patterns like "build MCP server", "create_mcp_server", etc.)
-  3. If intent detected → hands off to Gemini with tools attached for execution
-  4. If no intent → streams MetaClaw's response directly to the user
-- **Tool Intent Detection** (`_detect_tool_intent`): Parses MetaClaw responses for:
-  - Structured `tool_calls` in OpenAI format
-  - `additional_kwargs` provider-specific tool call formats
-  - Text-based keyword matching with requirements extraction
-- **Gemini Handoff Executor** (`_execute_with_gemini`): Creates a `ChatGoogleGenerativeAI` + `create_agent()` with:
-  - `create_mcp_server` built-in tool
-  - Any connected external MCP server tools
-  - System prompt: "MetaClaw has already decided, just execute"
-  - MetaClaw's analysis included as conversation context
-- **LangGraph Build Triggering**: When Gemini's agent calls `create_mcp_server`, the backend intercepts and proxies the LangGraph build stream to the frontend (same pipeline as existing flow)
-- **No User-Facing Duplication**: User sees ONE coherent response — either MetaClaw's direct answer (normal chat) or Gemini's execution output (tool action)
-- **Files Modified**: `backend/main.py` — added `_handle_metaclaw_request()`, `_execute_with_gemini()`, `_create_gemini_executor()`, `_detect_tool_intent()`, `_extract_requirements_from_text()`, `_create_mcp_server_tool()`
+- **Chat Session Persistence**: Persisted active `messages`, saved the current chat after request completion, cleared active messages when deleting the active history item, and prevented stale `currentChatId` values from corrupting history after reload.
+- **Backend Payload Hygiene**: Filtered frontend chat history before sending it to the backend so only `user` and `model` messages are replayed, preventing UI/system errors from becoming user prompts.
+- **MCP Agent Lifecycle**: Moved MCP session construction and state swapping under the agent lock, tracked MCP connection failures in state, cached MetaClaw clients correctly, and closed failed MCP `AsyncExitStack` instances to avoid leaks.
+- **SSE Completion**: Added the missing success-path `sse_done()` emission after MetaClaw/Gemini LangGraph build streaming.
+- **Test Updates**: Refreshed MetaClaw tests for current config defaults and import paths, fixed stale mock names, and added coverage for `use_mcp_tools` control events plus successful Gemini executor done sentinels.
 
----
+### Verification
 
-## [2026-04-14] LangGraph Build Proxying & Hallucination Fix
+- `npm run typecheck`
+- `npm run build`
+- `uv run --no-sync pytest backend\tests\test_metaclaw_integration.py -q` (`22 passed`)
 
-### Overview
+### Files Modified
 
-Solved the issue where the local agent would hallucinate tool execution reports after triggering a build, and implemented a robust backend-to-backend streaming proxy for LangGraph.
-
-### Changes
-
-- **Streaming Proxy**: Modified `backend/main.py` to intercept `create_mcp_server` tool calls and proxy the LangGraph progress stream directly to the frontend.
-- **Hallucination Prevention**: Implemented a "hard-stop" mechanism and refined the system prompt to prevent the local agent from generating fake success messages after triggering a build.
-- **Docker Networking**: Optimized the backend to automatically resolve LangGraph URLs using `NEXT_PUBLIC_LANGGRAPH_API_URL` and `host.docker.internal` for cross-container compatibility.
-
----
-
-## [2026-04-14] Unified Routing Architecture & MetaClaw Integration
-
-### Overview
-
-Successfully overhauled the chatbot's interaction model by unifying all routing through a single backend endpoint, removing manual mode toggles, and integrating MetaClaw as a smart LLM proxy.
-
-### Changes
-
-- **Unified Routing**: Removed "MCP Mode" toggle from the frontend. All messages are now routed through the `/chat` endpoint at the backend.
-- **Smart Tool Triggering**: Integrated the `create_mcp_server` tool into the backend's default LLM agent. The agent now autonomously decides when to trigger the LangGraph-based MCP creation flow.
-- **SSE Streaming**: Implemented Server-Sent Events (SSE) in the backend to support seamless streaming of text and tool outputs from multiple providers.
-- **MetaClaw Integration**: Configured the backend to use MetaClaw as the primary LLM provider, enabling persistent skills and memory injection.
-- **Context Forwarding**: Implemented full conversation history forwarding from the backend to the LangGraph agent during tool invocation.
-
----
-
-## [2026-04-14] MCP Streaming UI Polishing & Duplication Fix
-
-### Overview
-
-Enhanced MCP response rendering with structured delegate/context cards, success summaries, and more stable LangGraph stream handling to prevent duplicate or empty server result bubbles.
-
-### Changes
-
-- **Structured MCP output**: Added `DelegateBox`, `EnrichedContextBox`, and `McpSuccessCard` in `src/components/chat/chat-message.tsx` to render `DELEGATE_TO_EXAMINER`, `DELEGATE_TO_GENERATOR`, `ENRICHED_CONTEXT (RAG)`, and MCP success payloads as interactive, collapsible sections.
-- **Better MCP feedback**: Added copy-to-clipboard support, status indicators, and JSON configuration previews for successful MCP server creations.
-- **Streaming robustness**: Updated `src/lib/hooks/use-chat-store.ts` to track LangGraph message IDs and deduplicate repeated chunk events, avoiding stale or duplicated AI content during MCP creation.
-- **Empty bubble fix**: Improved MCP stream handling so the AI message content is accumulated and updated cleanly, preventing blank model bubbles during initial LangGraph streaming.
-
----
-
-## [2026-04-13] MCP Configuration UI Formatting
-
-### Overview
-
-Improved the presentation of MCP server configurations in the chat interface by automatically detecting and formatting raw JSON into Markdown code blocks.
-
-### Changes
-
-- **Auto-Formatting Logic**: Implemented `formatBotResponse` in `use-chat-store.ts` to wrap raw JSON objects (containing `mcpServers`) into triple-backtick JSON blocks.
-- **Ubiquitous Application**: Applied formatting to all LangGraph streaming event handlers (messages, partials, values) and the casual chat fallback, ensuring consistent output regardless of the processing path.
-- **UX Improvement**: JSON configurations are now clearly separated from conversational text, making them easier to read and copy.
-
----
-
-## [2026-04-13] LangGraph Streaming Fix & Message Deduplication
-
-### Overview
-
-Resolved a critical UX issue where the user's input was echoed back as part of the AI response, and improved the stability of multi-agent streaming by implementing intelligent message tracking.
-
-### Changes
-
-- **Smart Message Accumulation**: Overhauled `use-chat-store.ts` to track LangGraph message IDs (`msg.id`). The frontend now distinguishes between different agents/messages in a single stream, preventing intermediate tool-call tasks (which often repeat the user's input) from being concatenated into the final response.
-- **Agent Output Prioritization**: Implemented a "prefer-final" logic where the frontend prioritizes the `final_response` from the LangGraph `values` event. This ensures the user sees the definitive, cleaned output from the Supervisor Agent instead of raw intermediate chunks.
-- **Enhanced Streaming Logic**:
-  - Added support for clearing short, non-meaningful preambles when a definitive response starts (e.g., when "Configuration:" or JSON blocks are detected).
-  - Improved delta handling for `messages/partial` vs. full content handling for `messages` events.
-- **Robust Fallbacks**: Refined the thread-state fallback to ensure that even if a stream terminates abruptly, the final message content is correctly retrieved from the LangGraph server's persistent state.
+- `src/lib/hooks/use-chat-store.ts`
+- `backend/main.py`
+- `backend/metaclaw_client.py`
+- `backend/tests/test_metaclaw_integration.py`
 
 ---

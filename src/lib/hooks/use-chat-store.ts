@@ -6,6 +6,14 @@ import { v4 as uuidv4 } from "uuid";
 import type { ChatMessage, ChatSettings, ChatHistoryItem } from "@/lib/types";
 import { BACKEND_API, MODEL_CONFIG } from "@/lib/config";
 
+// Simple error logger - can be replaced with a proper logging service
+const logError = (...args: any[]) => {
+  if (process.env.NODE_ENV !== "production") {
+    console.error(...args);
+  }
+  // In production, integrate with your monitoring service (e.g., Sentry)
+};
+
 interface ChatState {
   messages: ChatMessage[];
   history: ChatHistoryItem[];
@@ -58,7 +66,8 @@ export const useChatStore = create<ChatState>()(
           newSettings.provider !== currentSettings.provider
         ) {
           updatedSettings.model =
-            MODEL_CONFIG[newSettings.provider as keyof typeof MODEL_CONFIG]?.defaultModel || updatedSettings.model;
+            MODEL_CONFIG[newSettings.provider as keyof typeof MODEL_CONFIG]
+              ?.defaultModel || updatedSettings.model;
         }
         set({ settings: updatedSettings, lastActive: Date.now() });
       },
@@ -143,8 +152,8 @@ export const useChatStore = create<ChatState>()(
       deleteHistory: (id: string) => {
         set((state) => ({
           history: state.history.filter((h) => h.id !== id),
-          currentChatId:
-            state.currentChatId === id ? null : state.currentChatId,
+          currentChatId: state.currentChatId === id ? null : state.currentChatId,
+          messages: state.currentChatId === id ? [] : state.messages,
         }));
       },
 
@@ -155,7 +164,7 @@ export const useChatStore = create<ChatState>()(
           currentChatId,
           persistCurrentChat,
         } = get();
-        
+
         const settings = overrideSettings || currentSettings;
 
         // Ensure we have a local chat ID
@@ -181,10 +190,12 @@ export const useChatStore = create<ChatState>()(
         const aiMessageId = uuidv4();
 
         try {
-          const historyForBackend = updatedMessages.map((msg) => ({
-            role: msg.role === "model" ? "model" : "user",
-            content: msg.content,
-          }));
+          const historyForBackend = updatedMessages
+            .filter((msg) => msg.role === "user" || msg.role === "model")
+            .map((msg) => ({
+              role: msg.role === "model" ? "model" : "user",
+              content: msg.content,
+            }));
 
           const response = await fetch(BACKEND_API.chat(), {
             method: "POST",
@@ -208,70 +219,122 @@ export const useChatStore = create<ChatState>()(
 
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
+          const bufferRef = { current: "" }; // Mutable buffer for incomplete SSE frames
           let fullContent = "";
           let hasAddedAiMessage = false;
+          let streamComplete = false;
+
+          const upsertAiMessage = (content: string) => {
+            if (!hasAddedAiMessage) {
+              set((state) => ({
+                messages: [
+                  ...state.messages,
+                  {
+                    id: aiMessageId,
+                    role: "model",
+                    content,
+                    timestamp: new Date().toISOString(),
+                  },
+                ],
+              }));
+              hasAddedAiMessage = true;
+            } else {
+              set((state) => ({
+                messages: state.messages.map((m) =>
+                  m.id === aiMessageId ? { ...m, content } : m,
+                ),
+              }));
+            }
+          };
+
+          const handleSsePayload = (dataStr: string) => {
+            if (dataStr === "[DONE]") {
+              streamComplete = true;
+              return;
+            }
+
+            const data = JSON.parse(dataStr);
+            const eventType = data.type as string | undefined;
+
+            if (eventType === "done") {
+              streamComplete = true;
+              return;
+            }
+
+            if (eventType === "error" || data.error) {
+              throw new Error(data.error || "Backend stream error");
+            }
+
+            const content =
+              eventType === "status" ? data.message : data.content;
+
+            if (typeof content === "string" && content.length > 0) {
+              fullContent += content;
+              upsertAiMessage(fullContent);
+            }
+          };
 
           while (true) {
             const { done, value } = await reader.read();
-            if (done) break;
 
+            // Decode chunk and append to buffer
             const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split("\n\n");
+            bufferRef.current += chunk;
+
+            // Split by double newline (SSE delimiter)
+            const lines = bufferRef.current.split("\n\n");
+            // Keep the last incomplete line in the buffer
+            bufferRef.current = lines.pop() || "";
 
             for (const line of lines) {
-              if (line.startsWith("data: ")) {
-                const dataStr = line.replace("data: ", "").trim();
-                
-                if (dataStr === "[DONE]") {
-                  break;
-                }
+              const dataLines = line
+                .split("\n")
+                .filter((entry) => entry.startsWith("data:"))
+                .map((entry) => entry.replace(/^data:\s?/, ""));
 
-                try {
-                  const data = JSON.parse(dataStr);
-                  if (data.content) {
-                    fullContent += data.content;
-                    
-                    if (!hasAddedAiMessage) {
-                      set((state) => ({
-                        messages: [...state.messages, {
-                          id: aiMessageId,
-                          role: "model",
-                          content: fullContent,
-                          timestamp: new Date().toISOString(),
-                        }],
-                      }));
-                      hasAddedAiMessage = true;
-                    } else {
-                      set((state) => ({
-                        messages: state.messages.map((m) =>
-                          m.id === aiMessageId ? { ...m, content: fullContent } : m
-                        ),
-                      }));
-                    }
-                  } else if (data.error) {
-                    throw new Error(data.error);
-                  }
-                } catch (e) {
-                  // Ignore partial parsing errors if the line is incomplete
-                }
+              for (const dataStr of dataLines) {
+                handleSsePayload(dataStr.trim());
+                if (streamComplete) break;
               }
+
+              if (streamComplete) break;
             }
+
+            if (done || streamComplete) break;
           }
 
-          persistCurrentChat();
-        } catch (error: any) {
-          console.error("Error calling AI flow:", error);
+          // Flush any remaining data in buffer after stream ends
+          if (bufferRef.current && bufferRef.current.startsWith("data:")) {
+            const dataLines = bufferRef.current
+              .split("\n")
+              .filter((entry) => entry.startsWith("data:"))
+              .map((entry) => entry.replace(/^data:\s?/, ""));
+
+            for (const dataStr of dataLines) {
+              handleSsePayload(dataStr.trim());
+              if (streamComplete) break;
+            }
+          }
+        } catch (error: unknown) {
+          logError("Error calling AI flow:", error);
           const errorMessage: ChatMessage = {
             id: uuidv4(),
             role: "system",
-            content: error.message || "Failed to connect to backend.",
+            content:
+              error instanceof Error
+                ? error.message
+                : "Failed to connect to backend.",
             timestamp: new Date().toISOString(),
           };
           set((state) => ({
-            messages: [...state.messages.filter(m => m.id !== aiMessageId), errorMessage],
+            messages: [
+              ...state.messages.filter((m) => m.id !== aiMessageId),
+              errorMessage,
+            ],
             lastActive: Date.now(),
           }));
         } finally {
+          persistCurrentChat();
           set({ isLoading: false });
         }
       },
@@ -280,6 +343,7 @@ export const useChatStore = create<ChatState>()(
       name: "gemini-insight-link-storage",
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
+        messages: state.messages,
         history: state.history,
         currentChatId: state.currentChatId,
         settings: state.settings,
@@ -287,14 +351,22 @@ export const useChatStore = create<ChatState>()(
       }),
       onRehydrateStorage: () => (state) => {
         if (state) {
-          // Migration: if provider is metaclaw, reset to gemini
-          // Use type casting since 'metaclaw' is no longer in the type definition
-          if ((state.settings?.provider as string) === "metaclaw") {
+          // Migration: ensure provider is valid
+          const validProviders = ["gemini", "groq"];
+          const provider = state.settings?.provider;
+          if (!provider || !validProviders.includes(provider)) {
             state.settings.provider = "gemini";
             state.settings.model = MODEL_CONFIG.gemini.defaultModel;
           }
 
           const now = Date.now();
+          if (
+            state.currentChatId &&
+            (!state.messages || state.messages.length === 0)
+          ) {
+            state.currentChatId = null;
+          }
+
           if (
             state.messages &&
             state.messages.length > 0 &&
@@ -307,13 +379,24 @@ export const useChatStore = create<ChatState>()(
               firstMsg.length > 30
                 ? firstMsg.substring(0, 30) + "..."
                 : firstMsg;
-            const newItem: ChatHistoryItem = {
+            const archivedItem: ChatHistoryItem = {
               id: uuidv4(),
               title: `(Archived) ${title}`,
               messages: [...state.messages],
               timestamp: new Date().toISOString(),
             };
-            state.history = [newItem, ...state.history];
+
+            if (state.currentChatId) {
+              const existingIndex = state.history.findIndex(
+                (item) => item.id === state.currentChatId,
+              );
+              if (existingIndex !== -1) {
+                archivedItem.id = state.currentChatId;
+                state.history.splice(existingIndex, 1);
+              }
+            }
+
+            state.history = [archivedItem, ...state.history];
             state.messages = [];
             state.currentChatId = null;
             state.isRightPanelOpen = false;

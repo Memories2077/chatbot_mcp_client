@@ -6,7 +6,7 @@ Eliminates scattered os.getenv() calls throughout the codebase.
 """
 import os
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 
 @dataclass
@@ -22,20 +22,25 @@ class LLMConfig:
     # MetaClaw proxy configuration
     metaclaw_enabled: bool
     metaclaw_base_url: str
-    metaclaw_api_key: str
+    metaclaw_api_key: Optional[str]
     metaclaw_model: str
+    metaclaw_top_p: float
+    metaclaw_max_tokens: int
 
     # General settings
     default_temperature: float
     default_timeout_ms: int
 
-    # Backend settings
+    # Backend/container settings
     backend_port: int
     langgraph_api_url: str
+    mcp_gen_base_url: str
 
     # MCP settings
     mcp_connection_timeout: float
     mcp_initialization_timeout: float
+    mcp_connection_retries: int
+    mcp_retry_delay: float
 
     # MongoDB settings
     mongodb_url: str
@@ -44,20 +49,31 @@ class LLMConfig:
     @classmethod
     def from_env(cls) -> "LLMConfig":
         """Load configuration from environment variables"""
-        # Backend port with validation
+        # Backend port with validation. Prefer backend-only BACKEND_PORT;
+        # keep NEXT_PUBLIC_BACKEND_PORT as a temporary compatibility fallback.
         try:
-            backend_port = int(os.getenv("NEXT_PUBLIC_BACKEND_PORT", "8000"))
+            backend_port = int(
+                os.getenv("BACKEND_PORT")
+                or os.getenv("NEXT_PUBLIC_BACKEND_PORT")
+                or "8000"
+            )
         except (ValueError, TypeError):
             backend_port = 8000
 
-        # LangGraph API URL with Docker fallback
+        # LangGraph is a backend-to-backend dependency. Prefer backend-only
+        # LANGGRAPH_API_URL; keep NEXT_PUBLIC_LANGGRAPH_API_URL only as a
+        # temporary compatibility fallback for older local env files.
         langgraph_url = (
-            os.getenv("NEXT_PUBLIC_LANGGRAPH_API_URL")
-            or os.getenv("LANGGRAPH_API_URL")
+            os.getenv("LANGGRAPH_API_URL")
+            or os.getenv("NEXT_PUBLIC_LANGGRAPH_API_URL")
             or "http://localhost:2024"
         )
 
-        return cls(
+        # mcp-gen manager URL as seen by the FastAPI backend/container.
+        mcp_gen_url = os.getenv("MCP_GEN_URL", "http://localhost:8080")
+
+        # Build configuration
+        config = cls(
             # Primary provider
             default_provider=os.getenv("LLM_PROVIDER", "gemini"),
             gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
@@ -68,27 +84,41 @@ class LLMConfig:
             # MetaClaw proxy
             metaclaw_enabled=os.getenv("METACLAW_ENABLED", "false").lower() == "true",
             metaclaw_base_url=os.getenv("METACLAW_BASE_URL", "http://localhost:30000/v1"),
-            metaclaw_api_key=os.getenv("METACLAW_API_KEY", "metaclaw"),
-            metaclaw_model=os.getenv("METACLAW_MODEL", "gemini-2.5-flash"),
+            metaclaw_api_key=os.getenv("METACLAW_API_KEY"),  # No default - required when enabled
+            metaclaw_model=os.getenv("METACLAW_MODEL", "qwen/qwen3-next-80b-a3b-instruct"),
+            metaclaw_top_p=float(os.getenv("METACLAW_TOP_P", "0.5")),
+            metaclaw_max_tokens=int(os.getenv("METACLAW_MAX_TOKENS", "100000")),
 
             # General settings
             default_temperature=float(os.getenv("LLM_TEMPERATURE", "0.0")),
             default_timeout_ms=int(os.getenv("LLM_TIMEOUT_MS", "300000")),
 
-            # Backend settings
+            # Backend/container settings
             backend_port=backend_port,
             langgraph_api_url=langgraph_url,
+            mcp_gen_base_url=mcp_gen_url.rstrip("/"),
 
             # MCP settings
             mcp_connection_timeout=float(os.getenv("MCP_CONNECTION_TIMEOUT", "10.0")),
             mcp_initialization_timeout=float(os.getenv("MCP_INIT_TIMEOUT", "10.0")),
+            mcp_connection_retries=int(os.getenv("MCP_CONNECTION_RETRIES", "3")),
+            mcp_retry_delay=float(os.getenv("MCP_RETRY_DELAY", "2.0")),
 
             # MongoDB settings
             mongodb_url=os.getenv("MONGODB_URL", "mongodb://mongodb:27017"),
             mongodb_db=os.getenv("MONGODB_DB", "docker"),
         )
 
-    def get_llm_provider(self, provider_override: str = None) -> str:
+        # Validate configuration
+        if config.metaclaw_enabled and not config.metaclaw_api_key:
+            raise ValueError(
+                "METACLAW_API_KEY is required when METACLAW_ENABLED=true. "
+                "Set the environment variable or disable MetaClaw."
+            )
+
+        return config
+
+    def get_llm_provider(self, provider_override: Optional[str] = None) -> str:
         """Get the effective provider to use"""
         if provider_override:
             return provider_override
@@ -105,7 +135,25 @@ class LLMConfig:
             "api_key": self.metaclaw_api_key,
             "model": self.metaclaw_model,
             "enabled": self.metaclaw_enabled,
+            "top_p": self.metaclaw_top_p,
+            "max_tokens": self.metaclaw_max_tokens,
         }
+
+
+    def get_configured_fallbacks(self) -> List[str]:
+        """Return direct/fallback providers with API keys configured."""
+        fallbacks: List[str] = []
+        if self.gemini_api_key:
+            fallbacks.append("gemini")
+        if self.groq_api_key:
+            fallbacks.append("groq")
+        return fallbacks
+
+    def get_effective_provider(self, requested_provider: Optional[str] = None) -> str:
+        """Return provider after MetaClaw proxy routing policy is applied."""
+        if self.is_metaclaw_enabled():
+            return "metaclaw"
+        return requested_provider or self.default_provider
 
 
 # Global configuration instance (loaded once at module import)

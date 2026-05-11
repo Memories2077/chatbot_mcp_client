@@ -34,7 +34,10 @@ const settingsSchema = z.object({
   model: z.string(),
   temperature: z.number().min(0).max(1),
   maxTokens: z.number().min(1),
-  mcpServers: z.array(z.object({ url: z.string().url('Please enter a valid URL.') })),
+  mcpServers: z.array(z.object({
+    url: z.string().url('Please enter a valid URL.'),
+    name: z.string().optional(),
+  })),
 });
 
 export function ChatSettings({ settings, setSettings }: ChatSettingsProps) {
