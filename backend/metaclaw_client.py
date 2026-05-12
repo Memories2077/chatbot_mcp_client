@@ -81,9 +81,23 @@ class MetaClawClient:
         self.base_url = config.metaclaw_base_url
         self.api_key = config.metaclaw_api_key
         self.model = model_name if model_name else config.metaclaw_model
+        self.mcp_tools: List[Any] = [] # Storage for tools metadata
 
         if not self.enabled:
             raise MetaClawDisabledError("MetaClaw is disabled in configuration")
+
+    def _get_mcp_tools_description(self) -> str:
+        """Helper to format MCP tools metadata for the prompt."""
+        if not self.mcp_tools:
+            return "No external MCP tools are currently connected."
+        
+        descriptions = []
+        for tool in self.mcp_tools:
+            name = getattr(tool, "name", "unknown")
+            desc = getattr(tool, "description", "no description")
+            descriptions.append(f"- {name}: {desc}")
+            
+        return "The following external MCP tools are AVAILABLE via the `use_mcp_tools` handoff:\n" + "\n".join(descriptions)
 
     def _extract_create_mcp_tool_call(self, response: Any) -> Optional[str]:
         """
@@ -161,10 +175,15 @@ class MetaClawClient:
             "generate mcp server", "i have initiated the build", "i'll build",
             "i will build", "i'll create", "i will create", "generating the mcp server",
             "starting the build", "start building", "let me build", "let me create",
+            "use_mcp_tools", "handoff to mcp", "using mcp tools",
         ]
         lower_content = content_text.lower()
         for keyword in keywords:
             if keyword in lower_content:
+                # If it mentions using existing tools, trigger handoff
+                if "use" in keyword or "handoff" in keyword:
+                     return {"type": "use_mcp_tools"}
+                
                 requirements = self._extract_requirements_from_text(content_text)
                 return {"type": "create_mcp_server", "requirements": requirements, "detected_from": "text"}
 
@@ -237,10 +256,10 @@ class MetaClawClient:
             )
         elif self.config.default_provider == "groq" and self.config.groq_api_key:
             logger.info(f"Using Groq as fallback: model={self.config.groq_model}")
-            return ChatGroq(
+            return cast(Any, ChatGroq)(
                 model=self.config.groq_model,
                 temperature=temperature,
-                api_key=self.config.groq_api_key,  # type: ignore
+                api_key=self.config.groq_api_key,
             )
         else:
             # Fallback to any available key if default_provider not explicitly set or keys missing
@@ -254,10 +273,10 @@ class MetaClawClient:
                 )
             elif self.config.groq_api_key:
                 logger.info("[MetaClawClient] Using Groq for fallback (default provider not explicitly set or invalid).")
-                return ChatGroq(
+                return cast(Any, ChatGroq)(
                     model=self.config.groq_model,
                     temperature=temperature,
-                    api_key=self.config.groq_api_key,  # type: ignore
+                    api_key=self.config.groq_api_key,
                 )
             else:
                 raise MetaClawError("No fallback LLM provider configured (GEMINI_API_KEY or GROQ_API_KEY missing.)")
@@ -271,31 +290,26 @@ class MetaClawClient:
     ) -> AsyncGenerator[str, None]:
         """
         Process chat request through MetaClaw with two-stage handoff.
-
-        Args:
-            messages: List of message dicts with role and content
-            temperature: LLM temperature setting
-            langgraph_url: URL for LangGraph build service
-
-        Yields:
-            SSE-formatted strings for streaming response
+        MetaClaw acts as a pure Intent Router.
         """
         # Prepare MetaClaw messages
         last_turn_index = len(messages) - 1
-        # Build MCP context for MetaClaw decision-making
-        if mcp_urls:
-            mcp_list = "\n".join([f"- {url}" for url in mcp_urls])
-            mcp_section = f"\n\nThe user has provided the following MCP servers:\n{mcp_list}\nIf the user asks to use tools from these servers, call the `use_mcp_tools` function. Do not ask for permission."
-        else:
-            mcp_section = "\n\nNo MCP servers are currently connected. If the user asks to use external tools, you may need to build an MCP server using `create_mcp_server`."
+        
+        # Pure Router System Prompt
+        metaclaw_system = f"""You are the Ethereal Intelligence Intent Router.
+Your SOLE purpose is to route the user's request to the correct handler.
 
-        metaclaw_system = f"""You are a helpful and intelligent AI assistant with deep knowledge of APIs, MCP servers, and tool building.
-The conversation history is provided with [Turn Index] and [Timestamp] for each message.
-The current message is [Turn {last_turn_index}].{mcp_section}
+ROUTING RULES:
+1. CREATE: If the user provides documentation/API requirements or asks to BUILD/GENERATE/CREATE a new MCP server, call `create_mcp_server`.
+2. HANDOFF: If the user's request involves TOOLS in any way (using them, asking what they are, asking about their parameters, or inquiring about their capabilities), you MUST call `use_mcp_tools` immediately. 
+   IMPORTANT: You do NOT have access to tool documentation or schemas. Only the execution agent does.
+3. CHAT: If the request is purely social (greetings, general questions, philosophy) and requires NO tools or data, respond directly.
 
-IMPORTANT: If the user provides an API guide, technical documentation, or any requirements that could be used to build an MCP server, you should clearly state that you will build it and describe what tools and capabilities the server will have.
+CONNECTED MCP SERVERS: {", ".join(mcp_urls) if mcp_urls else "None"}.
 
-LANGUAGE: Always respond in the same language the user is using. If the user writes in Vietnamese, respond in Vietnamese. If in English, respond in English. Match their language automatically for every message.
+STRATEGY: When in doubt, call `use_mcp_tools`. It is always better to hand off than to provide an incomplete answer about tools you cannot see.
+
+LANGUAGE: Always respond in the same language as the user.
 """
 
         from langchain_core.messages import BaseMessage
@@ -311,15 +325,10 @@ LANGUAGE: Always respond in the same language the user is using. If the user wri
             metaclaw_llm = await self._get_metaclaw_llm(temperature, session_done=True)
             metaclaw_response = await metaclaw_llm.ainvoke(metaclaw_msgs)
 
-            content_text = ""
-            if hasattr(metaclaw_response, "content"):
-                content_text = metaclaw_response.content or ""
-            elif isinstance(metaclaw_response, dict):
-                content_text = metaclaw_response.get("content", "") or ""
-            else:
-                content_text = str(metaclaw_response)
-            # Ensure content_text is always a string
-            content_text = cast(str, content_text)
+            raw_content = getattr(cast(Any, metaclaw_response), "content", None)
+            if raw_content is None and isinstance(metaclaw_response, dict):
+                raw_content = metaclaw_response.get("content", "")
+            content_text = str(raw_content) if raw_content is not None else str(metaclaw_response)
 
             logger.info(f"[MetaClaw] Response length: {len(content_text)} chars")
             logger.debug(f"[MetaClaw] Response preview: {content_text[:300]}...")
@@ -369,7 +378,9 @@ LANGUAGE: Always respond in the same language the user is using. If the user wri
 
                 # Stream response from the fallback LLM
                 async for chunk in fallback_llm.astream(fallback_messages):
-                    content = chunk.content
+                    content = getattr(cast(Any, chunk), "content", None)
+                    if content is None and isinstance(chunk, dict):
+                        content = chunk.get("content")
                     if content:
                         yield sse_content(str(content))
                 yield sse_done()
