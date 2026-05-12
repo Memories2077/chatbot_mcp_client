@@ -256,10 +256,10 @@ class MetaClawClient:
             )
         elif self.config.default_provider == "groq" and self.config.groq_api_key:
             logger.info(f"Using Groq as fallback: model={self.config.groq_model}")
-            return ChatGroq(
+            return cast(Any, ChatGroq)(
                 model=self.config.groq_model,
                 temperature=temperature,
-                api_key=self.config.groq_api_key,  # type: ignore
+                api_key=self.config.groq_api_key,
             )
         else:
             # Fallback to any available key if default_provider not explicitly set or keys missing
@@ -273,10 +273,10 @@ class MetaClawClient:
                 )
             elif self.config.groq_api_key:
                 logger.info("[MetaClawClient] Using Groq for fallback (default provider not explicitly set or invalid).")
-                return ChatGroq(
+                return cast(Any, ChatGroq)(
                     model=self.config.groq_model,
                     temperature=temperature,
-                    api_key=self.config.groq_api_key,  # type: ignore
+                    api_key=self.config.groq_api_key,
                 )
             else:
                 raise MetaClawError("No fallback LLM provider configured (GEMINI_API_KEY or GROQ_API_KEY missing.)")
@@ -325,15 +325,10 @@ LANGUAGE: Always respond in the same language as the user.
             metaclaw_llm = await self._get_metaclaw_llm(temperature, session_done=True)
             metaclaw_response = await metaclaw_llm.ainvoke(metaclaw_msgs)
 
-            content_text = ""
-            if hasattr(metaclaw_response, "content"):
-                content_text = metaclaw_response.content or ""
-            elif isinstance(metaclaw_response, dict):
-                content_text = metaclaw_response.get("content", "") or ""
-            else:
-                content_text = str(metaclaw_response)
-            # Ensure content_text is always a string
-            content_text = cast(str, content_text)
+            raw_content = getattr(cast(Any, metaclaw_response), "content", None)
+            if raw_content is None and isinstance(metaclaw_response, dict):
+                raw_content = metaclaw_response.get("content", "")
+            content_text = str(raw_content) if raw_content is not None else str(metaclaw_response)
 
             logger.info(f"[MetaClaw] Response length: {len(content_text)} chars")
             logger.debug(f"[MetaClaw] Response preview: {content_text[:300]}...")
@@ -383,7 +378,9 @@ LANGUAGE: Always respond in the same language the user is using. If the user wri
 
                 # Stream response from the fallback LLM
                 async for chunk in fallback_llm.astream(fallback_messages):
-                    content = chunk.content
+                    content = getattr(cast(Any, chunk), "content", None)
+                    if content is None and isinstance(chunk, dict):
+                        content = chunk.get("content")
                     if content:
                         yield sse_content(str(content))
                 yield sse_done()
@@ -458,6 +455,7 @@ Requirements from MetaClaw's analysis:
             # Stream LangGraph build - yield chunks directly
             async for sse_chunk in stream_langgraph_build(build_requirements, langgraph_url):
                 yield sse_chunk
+            yield f"data: {json.dumps({'type': 'mcp_build_complete', 'status': 'running', 'message': 'MCP Server built successfully!'})}\n\n"
             yield sse_done()
 
         except Exception as e:

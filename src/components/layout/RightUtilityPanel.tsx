@@ -21,6 +21,7 @@ export function RightUtilityPanel() {
   const { isRightPanelOpen, toggleRightPanel, settings, setSettings } = useChatStore();
   const [mcpInput, setMcpInput] = useState("");
   const [isVerifyingMcp, setIsVerifyingMcp] = useState(false);
+  const [expandedServers, setExpandedServers] = useState<Set<string>>(new Set());
   const { toast } = useToast();
   const [health, setHealth] = useState<BackendHealth | null>(null);
 
@@ -68,7 +69,8 @@ export function RightUtilityPanel() {
 
       const newMcp = {
         name: data.name,
-        url: trimmedUrl
+        url: trimmedUrl,
+        tools: data.tools || []
       };
 
       if (settings.mcpServers.some(s => s.url === newMcp.url)) {
@@ -99,6 +101,18 @@ export function RightUtilityPanel() {
 
   const handleRemoveMcp = (url: string) => {
     setSettings({ mcpServers: settings.mcpServers.filter(s => s.url !== url) });
+  };
+
+  const toggleServerTools = (url: string) => {
+    setExpandedServers(prev => {
+      const next = new Set(prev);
+      if (next.has(url)) {
+        next.delete(url);
+      } else {
+        next.add(url);
+      }
+      return next;
+    });
   };
 
   return (
@@ -232,20 +246,45 @@ export function RightUtilityPanel() {
 
           <div className="space-y-2 max-h-48 overflow-y-auto pr-1 no-scrollbar">
             {settings.mcpServers.map((server) => (
-              <div
-                key={server.url}
-                className="group flex items-center justify-between p-3 bg-surface-container-lowest/30 rounded-xl border border-outline-variant/5 hover:border-outline-variant/20 transition-all"
-              >
-                <div className="flex flex-col overflow-hidden mr-2">
-                  <span className="text-xs font-bold text-on-surface truncate">{server.name}</span>
-                  <span className="text-[9px] text-on-surface-variant truncate opacity-60">{server.url}</span>
-                </div>
-                <button
-                  onClick={() => handleRemoveMcp(server.url)}
-                  className="opacity-0 group-hover:opacity-100 p-1 hover:text-error transition-all"
+              <div key={server.url} className="space-y-1">
+                <div
+                  className="group flex items-center justify-between p-3 bg-surface-container-lowest/30 rounded-xl border border-outline-variant/5 hover:border-outline-variant/20 transition-all cursor-pointer"
+                  onClick={() => server.tools && server.tools.length > 0 && toggleServerTools(server.url)}
                 >
-                  <span className="material-symbols-outlined text-sm">delete</span>
-                </button>
+                  <div className="flex flex-col overflow-hidden mr-2">
+                    <span className="text-xs font-bold text-on-surface truncate">{server.name}</span>
+                    <span className="text-[9px] text-on-surface-variant truncate opacity-60">{server.url}</span>
+                    {server.tools && server.tools.length > 0 && (
+                      <span className="text-[9px] text-primary/60 mt-0.5">{server.tools.length} tool{server.tools.length > 1 ? 's' : ''}</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {server.tools && server.tools.length > 0 && (
+                      <span className="material-symbols-outlined text-xs text-on-surface-variant/50 transition-transform duration-200" style={{ transform: expandedServers.has(server.url) ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+                        expand_more
+                      </span>
+                    )}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleRemoveMcp(server.url); }}
+                      className="opacity-0 group-hover:opacity-100 p-1 hover:text-error transition-all"
+                    >
+                      <span className="material-symbols-outlined text-sm">delete</span>
+                    </button>
+                  </div>
+                </div>
+
+                {expandedServers.has(server.url) && server.tools && server.tools.length > 0 && (
+                  <div className="ml-2 space-y-1 border-l-2 border-primary/20 pl-3">
+                    {server.tools.map((tool) => (
+                      <div key={tool.name} className="p-2 rounded-lg bg-surface-container-low/40">
+                        <span className="text-[10px] font-mono font-bold text-primary/80">{tool.name}</span>
+                        {tool.description && (
+                          <p className="text-[9px] text-on-surface-variant/60 mt-0.5 truncate">{tool.description}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
             {settings.mcpServers.length === 0 && (

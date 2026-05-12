@@ -17,6 +17,7 @@ export interface ChatMessage {
 export interface ActiveMcpServer {
   url: string;
   name?: string;
+  tools?: { name: string; description: string }[];
 }
 
 // Full MCP server data from mcp-gen API (includes feedback)

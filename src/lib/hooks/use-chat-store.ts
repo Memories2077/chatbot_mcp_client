@@ -265,6 +265,12 @@ export const useChatStore = create<ChatState>()(
               throw new Error(data.error || "Backend stream error");
             }
 
+            if (eventType === "mcp_build_complete") {
+              fullContent += "\n\n✅ MCP Server built successfully!\n\n";
+              upsertAiMessage(fullContent);
+              return;
+            }
+
             const content =
               eventType === "status" ? data.message : data.content;
 

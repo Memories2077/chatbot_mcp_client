@@ -8,7 +8,7 @@ from typing import Optional, List, Dict, Any, AsyncGenerator, Union, cast
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 import requests
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -19,7 +19,7 @@ from mcp.client.streamable_http import streamable_http_client
 
 from langchain_mcp_adapters.tools import load_mcp_tools
 from langchain.agents import create_agent
-from langchain_core.language_models import BaseLanguageModel
+from langchain_core.runnables import Runnable
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
@@ -36,6 +36,9 @@ import database
 from shared import create_mcp_server_tool, stream_langgraph_build, extract_create_mcp_tool_call
 from metaclaw_client import MetaClawClient
 
+StandardAgent = Runnable[Any, Any]
+AgentLike = Union[StandardAgent, MetaClawClient]
+
 # For local development, read the port from config
 backend_port = llm_config.backend_port
 
@@ -45,7 +48,7 @@ logger = logging.getLogger(__name__)
 class CustomEncoder(json.JSONEncoder):
     def default(self, o):
         if hasattr(o, "content"):
-            return {"type": o.__class__.__name__, "content": o.content}
+            return {"type": o.__class__.__name__, "content": getattr(o, "content")}
         return super().default(o)
 
 class Message(BaseModel):
@@ -64,7 +67,7 @@ class McpMetadataRequest(BaseModel):
 
 class AgentState:
     def __init__(self):
-        self.agent: Optional[Any] = None
+        self.agent: Optional[AgentLike] = None
         self.metaclaw_client: Optional[MetaClawClient] = None
         self.mcp_connections: Dict[str, Dict[str, Any]] = {} # URL -> {"stack": AsyncExitStack, "tools": List}
         self.exit_stacks: List[AsyncExitStack] = [] # Legacy field
@@ -149,7 +152,7 @@ async def get_or_create_agent(
     model_name: str,
     mcp_urls: Optional[List[str]],
     temperature: float
-) -> Union[BaseLanguageModel, MetaClawClient]:
+) -> AgentLike:
     if mcp_urls is None:
         mcp_urls = []
     
@@ -195,10 +198,11 @@ async def get_or_create_agent(
                         streams = await stack.enter_async_context(streamable_http_client(url))
                         read, write, _ = streams
                         session = await stack.enter_async_context(ClientSession(read, write))
-                        await session.initialize()
+                        init_result = await session.initialize()
+                        server_name = init_result.serverInfo.name if hasattr(init_result, "serverInfo") else "Connected Server"
                         tools = await load_mcp_tools(session)
                         
-                        state.mcp_connections[url] = {"stack": stack, "tools": tools}
+                        state.mcp_connections[url] = {"stack": stack, "tools": tools, "name": server_name}
                         connected = True
                         logger.info(f"✅ Neural link established: {url}")
                         break
@@ -217,6 +221,7 @@ async def get_or_create_agent(
                 all_mcp_tools.extend(state.mcp_connections[url]["tools"])
 
         # 4. Create Agent
+        agent: AgentLike
         if provider == "metaclaw":
             from metaclaw_client import MetaClawClient
             agent = MetaClawClient(llm_config, model_name=model_name)
@@ -225,7 +230,8 @@ async def get_or_create_agent(
             llm = ChatGoogleGenerativeAI(model=model_name, temperature=temperature, api_key=llm_config.gemini_api_key)
             agent = create_agent(llm, all_mcp_tools) if all_mcp_tools else llm
         else: # groq
-            llm = ChatGroq(model=model_name, temperature=temperature, api_key=llm_config.groq_api_key)
+            groq_api_key = SecretStr(llm_config.groq_api_key) if llm_config.groq_api_key else None
+            llm = cast(Any, ChatGroq)(model=model_name, temperature=temperature, api_key=groq_api_key)
             agent = create_agent(llm, all_mcp_tools) if all_mcp_tools else llm
 
         # 5. Update state
@@ -244,31 +250,113 @@ async def get_or_create_agent(
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "metaclaw": llm_config.is_metaclaw_enabled()}
+    try:
+        requested_provider = llm_config.default_provider
+        effective_provider = llm_config.get_effective_provider(requested_provider)
+        configured_fallbacks = llm_config.get_configured_fallbacks()
+        return {
+            "status": "healthy",
+            "service": "backend",
+            "metaclawEnabled": llm_config.is_metaclaw_enabled(),
+            "effectiveProvider": effective_provider,
+            "configuredFallbacks": configured_fallbacks,
+            "langgraphApiUrl": llm_config.langgraph_api_url,
+            "mcpGenUrl": llm_config.mcp_gen_base_url,
+        }
+    except Exception as e:
+        return {"status": "unhealthy", "service": "backend", "detail": str(e)}
 
 @app.post("/mcp/metadata")
 async def get_mcp_metadata(request: McpMetadataRequest):
-    url = resolve_docker_url(request.url)
-    if url in state.mcp_connections:
-        return {"name": "Connected Server", "url": request.url, "status": "connected"}
+    original_url = request.url.strip() if request.url else ""
+    if not original_url:
+        raise HTTPException(status_code=400, detail="URL is required")
 
+    url = resolve_docker_url(original_url)
+    if url in state.mcp_connections:
+        conn = state.mcp_connections[url]
+        tools_list = [
+            {
+                "name": getattr(tool_item, "name", "unknown"),
+                "description": getattr(tool_item, "description", "") or "",
+            }
+            for tool_item in conn.get("tools", [])
+        ]
+        return {
+            "name": conn.get("name") or "Connected Server",
+            "url": original_url,
+            "status": "connected",
+            "tools": tools_list,
+        }
+
+    stack = AsyncExitStack()
     try:
-        stack = AsyncExitStack()
-        async with asyncio.timeout(15):
-            streams = await stack.enter_async_context(streamable_http_client(url))
-            session = await stack.enter_async_context(ClientSession(streams[0], streams[1]))
-            init = await session.initialize()
-            tools = await load_mcp_tools(session)
-            
-            async with state.lock:
-                state.mcp_connections[url] = {"stack": stack, "tools": tools}
-                if url not in state.current_mcp_urls:
-                    state.current_mcp_urls.append(url)
-            
-            return {"name": init.serverInfo.name, "url": request.url, "status": "connected"}
+        streams = await asyncio.wait_for(
+            stack.enter_async_context(streamable_http_client(url)),
+            timeout=llm_config.mcp_connection_timeout,
+        )
+        read, write, _ = streams
+        session = await stack.enter_async_context(ClientSession(read, write))
+        init_result = await asyncio.wait_for(
+            session.initialize(),
+            timeout=llm_config.mcp_initialization_timeout,
+        )
+        server_name = init_result.serverInfo.name if hasattr(init_result, "serverInfo") else "Unknown Server"
+        tools = await asyncio.wait_for(
+            load_mcp_tools(session),
+            timeout=llm_config.mcp_initialization_timeout,
+        )
+        tools_list = [
+            {
+                "name": getattr(tool_item, "name", "unknown"),
+                "description": getattr(tool_item, "description", "") or "",
+            }
+            for tool_item in tools
+        ]
+
+        async with state.lock:
+            old_conn = state.mcp_connections.get(url)
+            if old_conn and old_conn.get("stack") is not stack:
+                try:
+                    await old_conn["stack"].aclose()
+                except Exception as close_err:
+                    logger.debug(f"Could not close replaced MCP connection for {url}: {close_err}")
+            state.mcp_connections[url] = {"stack": stack, "tools": tools, "name": server_name}
+            state.agent = None
+
+        return {"name": server_name, "url": original_url, "status": "connected", "tools": tools_list}
+    except asyncio.TimeoutError as e:
+        await stack.aclose()
+        logger.error(f"Timed out fetching metadata for {url}: {e}", exc_info=True)
+        return {
+            "name": original_url.split("/")[-1] or "External Server",
+            "url": original_url,
+            "status": "error",
+            "errorCode": "timeout",
+            "detail": "Timed out while connecting to or initializing the MCP server.",
+        }
+    except ValueError as e:
+        await stack.aclose()
+        logger.error(f"Unsupported MCP transport or invalid URL for {url}: {e}", exc_info=True)
+        return {
+            "name": original_url.split("/")[-1] or "External Server",
+            "url": original_url,
+            "status": "error",
+            "errorCode": "unsupported_transport",
+            "detail": str(e),
+        }
     except Exception as e:
-        logger.error(f"Probe failed for {url}: {e}")
-        return {"name": "Error", "url": request.url, "status": "error", "detail": str(e)}
+        await stack.aclose()
+        error_text = str(e)
+        error_code = "initialization_error" if "initialize" in error_text.lower() else "connect_error"
+        logger.error(f"Failed to fetch metadata for {url}: {e}", exc_info=True)
+        return {
+            "name": original_url.split("/")[-1] or "External Server",
+            "url": original_url,
+            "status": "error",
+            "errorCode": error_code,
+            "detail": error_text,
+        }
 
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
@@ -300,27 +388,45 @@ async def chat_endpoint(request: ChatRequest):
         logger.exception("Chat error")
         raise HTTPException(status_code=500, detail=str(e))
 
-async def _stream_standard_agent_response(request, messages, mcp_urls, temp, state, agent=None):
+async def _stream_standard_agent_response(
+    request: ChatRequest,
+    messages: List[Dict[str, Any]],
+    mcp_urls: Optional[List[str]],
+    temp: float,
+    state: AgentState,
+    agent: Optional[StandardAgent] = None,
+) -> AsyncGenerator[str, None]:
     if agent is None:
-        agent = await get_or_create_agent(request.provider or "gemini", request.model or "gemini-2.5-flash", mcp_urls, temp)
+        provider = request.provider or llm_config.default_provider
+        default_model = llm_config.gemini_model if provider == "gemini" else llm_config.groq_model
+        created_agent = await get_or_create_agent(provider, request.model or default_model, mcp_urls, temp)
+        if isinstance(created_agent, MetaClawClient):
+            yield sse_error("MetaClaw cannot be used in the standard agent stream.")
+            yield sse_done()
+            return
+        agent = created_agent
     
-    # Check for tools in the agent object
-    has_tools = hasattr(agent, "tools") or (isinstance(agent, MetaClawClient) and bool(mcp_urls))
+    agent_tools = getattr(cast(Any, agent), "tools", None)
+    has_tools = bool(agent_tools)
     
-    prompt = get_system_prompt(has_tools, False, mcp_urls or [], len(messages)-1)
-    langchain_msgs = [SystemMessage(content=prompt)]
+    failures = state.current_mcp_failures if mcp_urls else []
+    if failures:
+        yield sse_status(f"> [WARNING]: Failed to connect to MCP servers: {', '.join(failures)}. Proceeding without tool support.\n\n")
+
+    prompt = get_system_prompt(has_tools, False, mcp_urls or [], len(messages) - 1)
+    langchain_msgs: List[Any] = [SystemMessage(content=prompt)]
     for m in messages:
-        langchain_msgs.append(HumanMessage(content=m["content"]) if m["role"] == "user" else AIMessage(content=m["content"]))
+        content = m.get("content", "")
+        langchain_msgs.append(HumanMessage(content=content) if m.get("role") == "user" else AIMessage(content=content))
 
     try:
-        # Use astream for real-time response generation
         full_content = ""
-        async for chunk in agent.astream({"messages": langchain_msgs}):
-            content_chunk = ""
+        agent_obj = cast(Any, agent)
+        stream_input = {"messages": langchain_msgs} if has_tools else langchain_msgs
+        async for chunk in agent_obj.astream(stream_input):
+            content_chunk: Any = ""
             
-            # 1. Handle LangGraph-style state updates (e.g., {'agent': {...}, 'model': {...}})
             if isinstance(chunk, dict):
-                # Try to find messages in any of the top-level keys
                 for key in ["messages", "agent", "model"]:
                     val = chunk.get(key)
                     if val:
@@ -331,18 +437,18 @@ async def _stream_standard_agent_response(request, messages, mcp_urls, temp, sta
                         else:
                             msg = val
                         
-                        if hasattr(msg, "content"):
-                            content_chunk = msg.content
+                        msg_content = getattr(msg, "content", None)
+                        if msg_content is not None:
+                            content_chunk = msg_content
                             break
 
-            # 2. Handle direct Message objects or fallback
             if not content_chunk:
-                if hasattr(chunk, "content"):
-                    content_chunk = chunk.content
+                chunk_content = getattr(chunk, "content", None)
+                if chunk_content is not None:
+                    content_chunk = chunk_content
                 elif isinstance(chunk, str):
                     content_chunk = chunk
 
-            # 3. Handle complex content formats (list of dicts like [{'type': 'text', 'text': '...'}])
             if isinstance(content_chunk, list):
                 parts = []
                 for part in content_chunk:
@@ -353,10 +459,7 @@ async def _stream_standard_agent_response(request, messages, mcp_urls, temp, sta
                 content_chunk = "".join(parts)
 
             if content_chunk:
-                # Ensure it's a string
                 safe_chunk = str(content_chunk)
-                
-                # Stream the clean chunk
                 yield sse_content(safe_chunk)
                 full_content += safe_chunk
 
@@ -366,27 +469,99 @@ async def _stream_standard_agent_response(request, messages, mcp_urls, temp, sta
     finally:
         yield sse_done()
 
-# (Remaining standard routes like /mcp/servers, feedback, etc. should be below)
+# ------------------------------------------------------------------ #
+# MCP Generator Proxy Endpoints                                        #
+# ------------------------------------------------------------------ #
+
 @app.get("/mcp/servers")
 async def list_mcp_servers():
+    """Proxy mcp-gen server listing through FastAPI to avoid browser CORS/service-name assumptions."""
     try:
-        response = await asyncio.to_thread(requests.get, f"{llm_config.mcp_gen_base_url}/api/mcp/servers", timeout=5)
+        response = await asyncio.to_thread(
+            requests.get,
+            f"{llm_config.mcp_gen_base_url}/api/mcp/servers",
+            timeout=llm_config.default_timeout_ms / 1000,
+        )
+        response.raise_for_status()
         return response.json()
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    except requests.RequestException as e:
+        logger.error(f"Failed to proxy mcp-gen server list: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=f"mcp-gen server list unavailable: {e}")
+
 
 class McpFeedbackRequest(BaseModel):
     type: str
     userId: Optional[str] = None
     comment: Optional[str] = None
 
+
 @app.post("/mcp/{server_id}/feedback")
 async def submit_mcp_feedback(server_id: str, request: McpFeedbackRequest):
+    """Proxy mcp-gen feedback submission through FastAPI."""
+    if request.type not in {"like", "dislike"}:
+        raise HTTPException(status_code=400, detail="Feedback type must be 'like' or 'dislike'.")
+
     try:
-        response = await asyncio.to_thread(requests.post, f"{llm_config.mcp_gen_base_url}/api/mcp/{server_id}/feedback", json=request.dict(exclude_none=True), timeout=5)
+        response = await asyncio.to_thread(
+            requests.post,
+            f"{llm_config.mcp_gen_base_url}/api/mcp/{server_id}/feedback",
+            json=request.dict(exclude_none=True),
+            timeout=llm_config.default_timeout_ms / 1000,
+        )
+        response.raise_for_status()
         return response.json()
+    except requests.RequestException as e:
+        logger.error(f"Failed to proxy mcp-gen feedback for {server_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=f"mcp-gen feedback unavailable: {e}")
+
+
+# ------------------------------------------------------------------ #
+# Gemini Executor for MCP Build                                        #
+# ------------------------------------------------------------------ #
+
+async def _execute_build_with_gemini(requirements: str, temperature: float) -> AsyncGenerator[str, None]:
+    """
+    Gemini executor: receives requirements from MetaClaw proxy,
+    calls create_mcp_server tool, then streams the LangGraph build.
+    Falls back to direct LangGraph trigger if Gemini skips the tool call.
+    """
+    gemini_system = """You are an autonomous MCP server builder assistant.
+The system has already determined that an MCP server should be built based on the user's request.
+Your job is to execute this decision by calling the create_mcp_server tool with the provided requirements.
+
+DO NOT ask for permission or confirmation — just execute the build immediately.
+DO NOT respond with text explanations — just trigger the tool and let the system handle progress reporting."""
+
+    gemini_msgs = [
+        SystemMessage(content=gemini_system),
+        HumanMessage(content=f"Build an MCP server with the following requirements:\n\n{requirements}"),
+    ]
+
+    try:
+        api_key = llm_config.gemini_api_key
+        if not api_key:
+            raise Exception("GEMINI_API_KEY not found.")
+
+        gemini_llm = ChatGoogleGenerativeAI(
+            model=llm_config.gemini_model,
+            temperature=temperature,
+            max_retries=2,
+            api_key=api_key,
+        ).bind_tools([create_mcp_server_tool()])
+
+        gemini_response = await gemini_llm.ainvoke(gemini_msgs)
+        detected_requirements = extract_create_mcp_tool_call(gemini_response)
+
+        build_requirements = detected_requirements if detected_requirements is not None else requirements
+        logger.info(f"[Gemini Executor] Triggering LangGraph build: {build_requirements[:100]}...")
+
+        async for sse in stream_langgraph_build(build_requirements, llm_config.langgraph_api_url):
+            yield sse
+        yield f"data: {json.dumps({'type': 'mcp_build_complete', 'status': 'running', 'message': 'MCP Server built successfully!'})}\n\n"
     except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        err_msg = f"\n\n> [ERROR]: Gemini executor failed: {str(e)}\n\n"
+        yield sse_content(err_msg)
+
 
 def get_system_prompt(has_mcp_tools, has_create_mcp_server_tool, mcp_urls, last_turn_index):
     base = f"You are a helpful AI assistant. [Turn {last_turn_index}]. Respond in the same language as the user."
