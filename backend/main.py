@@ -75,6 +75,8 @@ class AgentState:
         self.current_model: Optional[str] = None
         self.current_mcp_urls: List[str] = []
         self.current_mcp_failures: List[str] = []
+        self.current_mcp_tool_count: int = 0
+        self.current_agent_expects_dict: bool = False
         self.current_temperature: Optional[float] = None
         self.lock = asyncio.Lock()
 
@@ -226,13 +228,16 @@ async def get_or_create_agent(
             from metaclaw_client import MetaClawClient
             agent = MetaClawClient(llm_config, model_name=model_name)
             agent.mcp_tools = all_mcp_tools
+            agent_expects_dict = False
         elif provider == "gemini":
             llm = ChatGoogleGenerativeAI(model=model_name, temperature=temperature, api_key=llm_config.gemini_api_key)
             agent = create_agent(llm, all_mcp_tools) if all_mcp_tools else llm
+            agent_expects_dict = bool(all_mcp_tools)
         else: # groq
             groq_api_key = SecretStr(llm_config.groq_api_key) if llm_config.groq_api_key else None
             llm = cast(Any, ChatGroq)(model=model_name, temperature=temperature, api_key=groq_api_key)
             agent = create_agent(llm, all_mcp_tools) if all_mcp_tools else llm
+            agent_expects_dict = bool(all_mcp_tools)
 
         # 5. Update state
         state.agent = agent
@@ -240,6 +245,8 @@ async def get_or_create_agent(
         state.current_model = model_name
         state.current_mcp_urls = target_urls.copy()
         state.current_mcp_failures = new_failures
+        state.current_mcp_tool_count = len(all_mcp_tools)
+        state.current_agent_expects_dict = agent_expects_dict
         state.current_temperature = temperature
         
         return agent
@@ -406,8 +413,8 @@ async def _stream_standard_agent_response(
             return
         agent = created_agent
     
-    agent_tools = getattr(cast(Any, agent), "tools", None)
-    has_tools = bool(agent_tools)
+    has_tools = state.current_mcp_tool_count > 0
+    agent_expects_dict = state.current_agent_expects_dict
     
     failures = state.current_mcp_failures if mcp_urls else []
     if failures:
@@ -422,7 +429,7 @@ async def _stream_standard_agent_response(
     try:
         full_content = ""
         agent_obj = cast(Any, agent)
-        stream_input = {"messages": langchain_msgs} if has_tools else langchain_msgs
+        stream_input = {"messages": langchain_msgs} if agent_expects_dict else langchain_msgs
         async for chunk in agent_obj.astream(stream_input):
             content_chunk: Any = ""
             

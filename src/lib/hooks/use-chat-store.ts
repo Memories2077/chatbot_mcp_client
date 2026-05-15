@@ -43,6 +43,25 @@ const defaultSettings: ChatSettings = {
   mcpServers: [],
 };
 
+const MCP_BUILD_TRANSCRIPT_PATTERNS = [
+  /DELEGATE_TO_EXAMINER:/i,
+  /DELEGATE_TO_GENERATOR:/i,
+  /ENRICHED_CONTEXT\s*\(RAG\):/i,
+  /MCP Server (?:built|created) successfully/i,
+];
+
+const toBackendMessageContent = (message: ChatMessage): string => {
+  if (message.role !== "model") {
+    return message.content;
+  }
+
+  if (MCP_BUILD_TRANSCRIPT_PATTERNS.some((pattern) => pattern.test(message.content))) {
+    return "An MCP server build was completed successfully in the previous assistant turn. The detailed build transcript is UI-only and should not be repeated.";
+  }
+
+  return message.content;
+};
+
 export const useChatStore = create<ChatState>()(
   persist(
     (set, get) => ({
@@ -194,7 +213,7 @@ export const useChatStore = create<ChatState>()(
             .filter((msg) => msg.role === "user" || msg.role === "model")
             .map((msg) => ({
               role: msg.role === "model" ? "model" : "user",
-              content: msg.content,
+              content: toBackendMessageContent(msg),
             }));
 
           const response = await fetch(BACKEND_API.chat(), {
