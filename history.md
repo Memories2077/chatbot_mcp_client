@@ -1,3 +1,52 @@
+## [2026-05-15] Chat History Stabilization and LangChain Agent Input Contract Fixes
+
+### Overview
+
+Stabilized the chat client/backend bridge after the LangChain MCP generation flow started emitting frontend-specific progress and success markers. The main goal was to keep the rich MCP build transcript visible in the UI while preventing that transcript from being replayed back into later chat requests, and to fix backend input formatting for LangGraph-style agents that require dictionary input.
+
+### Changes
+
+#### Backend Agent Invocation
+
+- Updated `backend/main.py` to track whether the active standard agent expects LangGraph/create-agent dictionary input or plain message-list input.
+- Added state tracking for the current MCP tool count and current agent input shape so the backend can choose the correct streaming call format.
+- Changed `_stream_standard_agent_response` to invoke agents with:
+  - `{"messages": langchain_msgs}` when the current agent expects dict input;
+  - `langchain_msgs` when the current agent expects plain message-list input.
+- Fixed the runtime error:
+
+```text
+Expected dict, got [SystemMessage(...), HumanMessage(...)]
+```
+
+which occurred when a LangGraph/create-agent runnable was called with a raw message list.
+
+#### Frontend Chat History Handling
+
+- Updated `src/lib/hooks/use-chat-store.ts` so previous MCP build transcripts are not sent back to the backend as raw assistant history.
+- Added MCP build transcript detection for markers such as:
+  - `DELEGATE TO EXAMINER`
+  - `DELEGATE TO GENERATOR`
+  - `ENRICHED CONTEXT (RAG)`
+  - `MCP Server built/created successfully`
+- Added conversion logic that replaces old build transcripts with a compact summary before sending chat history to the backend.
+- Prevented old MCP build UI blocks from reappearing when the user continues chatting after a successful MCP generation.
+
+### Result
+
+- ✅ Follow-up user messages no longer replay stale MCP build progress cards.
+- ✅ New chats and chats without connected MCP tools no longer crash with the LangGraph `Expected dict` input error.
+- ✅ The frontend can keep rendering the full MCP build transcript while the backend receives a cleaner conversational history.
+- ✅ Internal LangChain response contracts remain compatible with frontend success-marker rendering.
+
+### Verification
+
+- `python3 -m py_compile backend/main.py` passed.
+- `git diff --check -- backend/main.py src/lib/hooks/use-chat-store.ts` passed.
+- `npm run typecheck` was attempted but still fails on an existing Next 16 config issue in `next.config.ts` (`eslint` is no longer a valid `NextConfig` property). This failure is unrelated to the chat-history and agent-input fixes.
+
+---
+
 ## [2026-05-08] Docker Runtime Configuration, MetaClaw Proxy, and MCP Feedback Integration
 
 ### Overview
