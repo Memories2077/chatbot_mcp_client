@@ -7,6 +7,12 @@
 - `mcp-gen` can still link human feedback to generation outcomes through `serverId`, so this is not blocking the current feedback-learning flow.
 - Deferred follow-up: if duplicate build prevention, cross-service tracing, or build-id-first status lookup becomes important, propagate at least `buildRequestId` from LangGraph state into the `mcp-gen` create payload. Full `sessionId` / `workspaceId` / `memoryScope` propagation should be handled separately because `mcp-gen` currently mostly stores those fields unless its generation calls are also updated to use them.
 
+### Legacy Notice
+
+- `backend/models.py`, `test_feedback_backend.py`, and parts of the MongoDB integration guide still reflect the older chatbot-owned `/api/feedback` / message-feedback implementation.
+- The active generated MCP server feedback path is now FastAPI `/mcp/{server_id}/feedback` -> `mcp-gen` `/api/mcp/{serverId}/feedback` -> MongoDB `logs.feedbacks`.
+- Leave the legacy files untouched for now; if this becomes confusing for collaborators, handle it as a separate cleanup by removing or relocating the obsolete chatbot feedback flow instead of adding scattered inline comments.
+
 ---
 
 ## [2026-05-15] Chat History Stabilization and LangChain Agent Input Contract Fixes
