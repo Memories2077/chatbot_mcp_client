@@ -1,3 +1,14 @@
+## [2026-05-17] Deferred Metadata Propagation Follow-up
+
+### Known Issue
+
+- The frontend and FastAPI backend already create and forward MCP build metadata such as `buildRequestId`, `sessionId`, `userId`, `workspaceId`, `email`, and `memoryScope` into the LangGraph request context.
+- The current LangChain generation path does not yet propagate that full metadata set through `create_MCPServer` into `mcp-gen`.
+- `mcp-gen` can still link human feedback to generation outcomes through `serverId`, so this is not blocking the current feedback-learning flow.
+- Deferred follow-up: if duplicate build prevention, cross-service tracing, or build-id-first status lookup becomes important, propagate at least `buildRequestId` from LangGraph state into the `mcp-gen` create payload. Full `sessionId` / `workspaceId` / `memoryScope` propagation should be handled separately because `mcp-gen` currently mostly stores those fields unless its generation calls are also updated to use them.
+
+---
+
 ## [2026-05-15] Chat History Stabilization and LangChain Agent Input Contract Fixes
 
 ### Overview
