@@ -13,6 +13,12 @@
 - The active generated MCP server feedback path is now FastAPI `/mcp/{server_id}/feedback` -> `mcp-gen` `/api/mcp/{serverId}/feedback` -> MongoDB `logs.feedbacks`.
 - Leave the legacy files untouched for now; if this becomes confusing for collaborators, handle it as a separate cleanup by removing or relocating the obsolete chatbot feedback flow instead of adding scattered inline comments.
 
+### Feedback UI Follow-up
+
+- Updated the generated MCP server feedback UI so both like and dislike open an inline optional note composer instead of sending immediately.
+- Users can submit feedback with a plaintext note, skip the note, or cancel without sending.
+- The UI still sends a single feedback request per action, preserving the existing `mcp-gen` feedback counter and learning semantics.
+
 ---
 
 ## [2026-05-15] Chat History Stabilization and LangChain Agent Input Contract Fixes
