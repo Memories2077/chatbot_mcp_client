@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { fetchMcpServers, submitMcpServerFeedback, fetchMcpClaudeConfig, extractMcpRemoteUrl, type McpServerApi } from '@/lib/mcp-server-api';
 import { ThumbsUp, ThumbsDown, RefreshCw, AlertCircle, Link2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { useChatStore } from '@/lib/hooks/use-chat-store';
 import { BACKEND_API } from '@/lib/config';
 import { useToast } from '@/hooks/use-toast';
@@ -14,11 +15,22 @@ interface McpServerFeedbackListProps {
   className?: string;
 }
 
+type FeedbackType = 'like' | 'dislike';
+
+interface ActiveFeedbackComposer {
+  serverId: string;
+  type: FeedbackType;
+}
+
+const MAX_FEEDBACK_COMMENT_LENGTH = 1000;
+
 export function McpServerFeedbackList({ className }: McpServerFeedbackListProps) {
   const [servers, setServers] = useState<McpServerApi[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState<Set<string>>(new Set());
+  const [activeFeedback, setActiveFeedback] = useState<ActiveFeedbackComposer | null>(null);
+  const [feedbackDrafts, setFeedbackDrafts] = useState<Record<string, string>>({});
   const [activating, setActivating] = useState<Set<string>>(new Set());
   const { settings, setSettings } = useChatStore();
   const { toast } = useToast();
@@ -49,40 +61,52 @@ export function McpServerFeedbackList({ className }: McpServerFeedbackListProps)
     return () => clearInterval(interval);
   }, [servers]);
 
-  const handleFeedback = async (serverId: string, type: 'like' | 'dislike') => {
-    // Optimistic update
-    setServers(prev =>
-      prev.map(server => {
-        if (server.serverId !== serverId) return server;
-        const currentLike = server.likeCount ?? 0;
-        const currentDislike = server.dislikeCount ?? 0;
-        return {
-          ...server,
-          likeCount: type === 'like' ? currentLike + 1 : currentLike,
-          dislikeCount: type === 'dislike' ? currentDislike + 1 : currentDislike,
-        };
-      })
-    );
+  const openFeedbackComposer = (serverId: string, type: FeedbackType) => {
+    setError(null);
+    setActiveFeedback({ serverId, type });
+  };
 
+  const updateFeedbackDraft = (serverId: string, value: string) => {
+    setFeedbackDrafts(prev => ({
+      ...prev,
+      [serverId]: value.slice(0, MAX_FEEDBACK_COMMENT_LENGTH),
+    }));
+  };
+
+  const clearFeedbackComposer = (serverId?: string) => {
+    setActiveFeedback(null);
+    if (!serverId) return;
+    setFeedbackDrafts(prev => {
+      const next = { ...prev };
+      delete next[serverId];
+      return next;
+    });
+  };
+
+  const handleFeedbackSubmit = async (serverId: string, type: FeedbackType, includeComment: boolean) => {
     setFeedbackSubmitting(prev => new Set(prev).add(serverId));
 
     try {
-      await submitMcpServerFeedback(serverId, type);
-      // Success - keep optimistic update
-    } catch (err) {
-      // Revert on error
-      setServers(prev =>
-        prev.map(server => {
-          if (server.serverId !== serverId) return server;
-          const currentLike = server.likeCount ?? 0;
-          const currentDislike = server.dislikeCount ?? 0;
-          return {
-            ...server,
-            likeCount: type === 'like' ? currentLike - 1 : currentLike,
-            dislikeCount: type === 'dislike' ? currentDislike - 1 : currentDislike,
-          };
-        })
+      const draft = feedbackDrafts[serverId]?.trim() ?? '';
+      const result = await submitMcpServerFeedback(
+        serverId,
+        type,
+        undefined,
+        includeComment && draft ? draft : undefined,
       );
+      setServers(prev =>
+        prev.map(server =>
+          server.serverId === serverId
+            ? {
+                ...server,
+                likeCount: result.likeCount,
+                dislikeCount: result.dislikeCount,
+              }
+            : server,
+        ),
+      );
+      clearFeedbackComposer(serverId);
+    } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to submit feedback');
     } finally {
       setFeedbackSubmitting(prev => {
@@ -235,85 +259,158 @@ export function McpServerFeedbackList({ className }: McpServerFeedbackListProps)
       </div>
 
       <div className="space-y-2">
-        {servers.map(server => (
-          <div
-            key={server.serverId}
-            className="group rounded-lg border border-outline-variant/10 bg-surface-container-low/20 p-3 hover:bg-surface-container-low/30 transition-colors"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs font-mono font-bold text-primary/80 truncate">
-                    {server.serverId}
-                  </span>
-                  <span className={cn("text-[10px] font-bold uppercase", getStatusColor(server.status))}>
-                    {server.status}
-                  </span>
-                </div>
+        {servers.map(server => {
+          const isComposerOpen = activeFeedback?.serverId === server.serverId;
+          const feedbackType = activeFeedback?.type ?? 'like';
+          const draft = feedbackDrafts[server.serverId] ?? '';
+          const isSubmittingFeedback = feedbackSubmitting.has(server.serverId);
+          const composerTitle = feedbackType === 'like'
+            ? 'What worked well?'
+            : 'What went wrong?';
+          const composerPlaceholder = feedbackType === 'like'
+            ? 'Optional note: accurate tools, auth worked, clean schema...'
+            : 'Optional note: auth issue, schema mismatch, pagination wrong, timeout...';
 
-                <div className="text-[10px] text-on-surface-variant/70 mb-2">
-                  Created: {formatDate(server.createdAt)}
-                </div>
-
-                {server.publicUrl && (
-                  <div className="text-[10px] font-mono text-on-surface/60 truncate">
-                    {server.publicUrl}
+          return (
+            <div
+              key={server.serverId}
+              className="group rounded-lg border border-outline-variant/10 bg-surface-container-low/20 p-3 hover:bg-surface-container-low/30 transition-colors"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs font-mono font-bold text-primary/80 truncate">
+                      {server.serverId}
+                    </span>
+                    <span className={cn("text-[10px] font-bold uppercase", getStatusColor(server.status))}>
+                      {server.status}
+                    </span>
                   </div>
-                )}
+
+                  <div className="text-[10px] text-on-surface-variant/70 mb-2">
+                    Created: {formatDate(server.createdAt)}
+                  </div>
+
+                  {server.publicUrl && (
+                    <div className="text-[10px] font-mono text-on-surface/60 truncate">
+                      {server.publicUrl}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => handleActivate(server)}
+                    disabled={activating.has(server.serverId) || server.status !== 'running'}
+                    className="h-8 px-2 text-xs gap-1.5 opacity-60 hover:opacity-100"
+                    title="Activate generated MCP server"
+                  >
+                    {activating.has(server.serverId) ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Link2 className="w-3.5 h-3.5" />
+                    )}
+                  </Button>
+
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => openFeedbackComposer(server.serverId, 'like')}
+                    disabled={isSubmittingFeedback}
+                    className={cn(
+                      "h-8 px-2 text-xs gap-1.5",
+                      "opacity-60 hover:opacity-100",
+                      (server.likeCount ?? 0) > 0 && "text-emerald-500 opacity-100",
+                      isComposerOpen && feedbackType === 'like' && "bg-emerald-500/10 opacity-100",
+                    )}
+                    title="Like this MCP server"
+                  >
+                    <ThumbsUp className={cn("w-3.5 h-3.5", (server.likeCount ?? 0) > 0 && "fill-current")} />
+                    <span className="font-mono">{server.likeCount ?? 0}</span>
+                  </Button>
+
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => openFeedbackComposer(server.serverId, 'dislike')}
+                    disabled={isSubmittingFeedback}
+                    className={cn(
+                      "h-8 px-2 text-xs gap-1.5",
+                      "opacity-60 hover:opacity-100",
+                      (server.dislikeCount ?? 0) > 0 && "text-red-500 opacity-100",
+                      isComposerOpen && feedbackType === 'dislike' && "bg-red-500/10 opacity-100",
+                    )}
+                    title="Dislike this MCP server"
+                  >
+                    <ThumbsDown className={cn("w-3.5 h-3.5", (server.dislikeCount ?? 0) > 0 && "fill-current")} />
+                    <span className="font-mono">{server.dislikeCount ?? 0}</span>
+                  </Button>
+                </div>
               </div>
 
-              {/* Feedback buttons - always visible but subtle */}
-              <div className="flex items-center gap-1 flex-shrink-0">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => handleActivate(server)}
-                  disabled={activating.has(server.serverId) || server.status !== 'running'}
-                  className="h-8 px-2 text-xs gap-1.5 opacity-60 hover:opacity-100"
-                  title="Activate generated MCP server"
-                >
-                  {activating.has(server.serverId) ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Link2 className="w-3.5 h-3.5" />
-                  )}
-                </Button>
+              {isComposerOpen && (
+                <div className="mt-3 rounded-md border border-outline-variant/10 bg-surface-container-low/30 p-2">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-on-surface">
+                      {feedbackType === 'like' ? (
+                        <ThumbsUp className="h-3.5 w-3.5 text-emerald-500" />
+                      ) : (
+                        <ThumbsDown className="h-3.5 w-3.5 text-red-500" />
+                      )}
+                      <span>{composerTitle}</span>
+                    </div>
+                    <span className="font-mono text-[10px] text-on-surface-variant/70">
+                      {draft.length}/{MAX_FEEDBACK_COMMENT_LENGTH}
+                    </span>
+                  </div>
 
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => handleFeedback(server.serverId, 'like')}
-                  disabled={feedbackSubmitting.has(server.serverId)}
-                  className={cn(
-                    "h-8 px-2 text-xs gap-1.5",
-                    "opacity-60 hover:opacity-100",
-                    (server.likeCount ?? 0) > 0 && "text-emerald-500 opacity-100"
-                  )}
-                  title="Like this MCP server"
-                >
-                  <ThumbsUp className={cn("w-3.5 h-3.5", (server.likeCount ?? 0) > 0 && "fill-current")} />
-                  <span className="font-mono">{server.likeCount ?? 0}</span>
-                </Button>
+                  <Textarea
+                    value={draft}
+                    maxLength={MAX_FEEDBACK_COMMENT_LENGTH}
+                    onChange={(event) => updateFeedbackDraft(server.serverId, event.target.value)}
+                    placeholder={composerPlaceholder}
+                    disabled={isSubmittingFeedback}
+                    className="min-h-[72px] resize-none border-outline-variant/20 bg-surface-container-low/40 px-2 py-2 text-xs"
+                  />
 
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => handleFeedback(server.serverId, 'dislike')}
-                  disabled={feedbackSubmitting.has(server.serverId)}
-                  className={cn(
-                    "h-8 px-2 text-xs gap-1.5",
-                    "opacity-60 hover:opacity-100",
-                    (server.dislikeCount ?? 0) > 0 && "text-red-500 opacity-100"
-                  )}
-                  title="Dislike this MCP server"
-                >
-                  <ThumbsDown className={cn("w-3.5 h-3.5", (server.dislikeCount ?? 0) > 0 && "fill-current")} />
-                  <span className="font-mono">{server.dislikeCount ?? 0}</span>
-                </Button>
-              </div>
+                  <div className="mt-2 flex flex-wrap items-center justify-end gap-1.5">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => clearFeedbackComposer(server.serverId)}
+                      disabled={isSubmittingFeedback}
+                      className="h-7 px-2 text-xs"
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleFeedbackSubmit(server.serverId, feedbackType, false)}
+                      disabled={isSubmittingFeedback}
+                      className="h-7 px-2 text-xs"
+                    >
+                      Skip note
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => handleFeedbackSubmit(server.serverId, feedbackType, true)}
+                      disabled={isSubmittingFeedback}
+                      className="h-7 px-2 text-xs"
+                    >
+                      {isSubmittingFeedback ? (
+                        <RefreshCw className="mr-1 h-3 w-3 animate-spin" />
+                      ) : null}
+                      Submit
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
